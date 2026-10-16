@@ -1,6 +1,6 @@
 <!doctype html><html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Quét QR cấp nguyên liệu - liên tục v4</title><script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script><style>
 body{margin:0;background:#edf3f7;color:#17365d;font:16px Arial,sans-serif}main{max-width:560px;margin:auto;padding:18px;background:white;min-height:100vh;box-sizing:border-box}h2{text-align:center;font-size:21px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.dc{padding:16px 5px;border:1px solid #a8bfd0;border-radius:9px;background:#eaf1f8;font-size:18px;font-weight:bold;color:#17365d}.dc.active{background:#176b42;color:white}.btn{padding:15px;width:100%;background:#176b42;color:white;border:0;border-radius:9px;font-size:17px;font-weight:bold;margin:9px 0}.btn:disabled{opacity:.5}label{display:block;font-weight:bold;margin:15px 0 8px}input{width:100%;box-sizing:border-box;padding:13px;border:1px solid #b7c8d8;border-radius:8px;font-size:17px}#reader{margin-top:10px}#status{white-space:pre-wrap;line-height:1.5;padding:10px;border-radius:8px}.warn{background:#ffe8e8;color:#8d1c1c}.success{background:#e0f5e9;color:#176b42}.note{font-size:14px;color:#5b6e7c;line-height:1.5}#confirm{display:none;background:#eef4f9;padding:14px;border-radius:10px;margin:15px 0}#confirm strong{overflow-wrap:anywhere}#transport{display:none}
-</style></head><body><main><h2>QUÉT QR CẤP NGUYÊN LIỆU</h2><p class="note">Chọn dây chuyền, quét QR, nhấn CẬP NHẬT. Camera giữ hoạt động khi xác nhận; ghi thành công sẽ tự quét tiếp, không mở tab mới.</p><label>1. Chọn dây chuyền</label><div id="lines" class="grid"></div><label>2. Người xuất (nhập một lần)</label><input id="person" placeholder="Họ tên nhân viên" maxlength="100" autocomplete="name"><label>3. Quét mã QR</label><button class="btn" id="start">BẬT CAMERA QUÉT QR</button><button class="btn" id="stop" style="background:#687989" disabled>DỪNG CAMERA</button><div id="reader"></div><div id="confirm"><div>Dây chuyền: <strong id="chosenDc"></strong></div><div>Mã nguyên liệu: <strong id="chosenCode"></strong></div><button class="btn" id="save">CẬP NHẬT</button><button class="btn" id="cancel" style="background:#687989">QUÉT LẠI</button></div><label>Dự phòng: nhập mã bằng tay</label><input id="manual" placeholder="Ví dụ: 001245" maxlength="100" autocomplete="off"><button class="btn" id="manualGo">XÁC NHẬN MÃ NHẬP TAY</button><p id="status" class="note" role="status" aria-live="polite"></p><p class="note">Chỉ cấp nguyên liệu khi hiện thông báo ĐÃ GHI NHẬN. Nếu mất mạng hoặc hết thời gian chờ, hãy kiểm tra dữ liệu trước khi thử lại.</p><iframe id="transport" name="transport"></iframe></main><script>
+</style></head><body><main><h2>QUÉT QR CẤP NGUYÊN LIỆU · V5</h2><p class="note">Chọn dây chuyền, quét QR, nhấn CẬP NHẬT. Camera giữ hoạt động khi xác nhận; ghi thành công sẽ tự quét tiếp, không mở tab mới.</p><label>1. Chọn dây chuyền</label><div id="lines" class="grid"></div><label>2. Người xuất (nhập một lần)</label><input id="person" placeholder="Họ tên nhân viên" maxlength="100" autocomplete="name"><label>3. Quét mã QR</label><button class="btn" id="start">BẬT CAMERA QUÉT QR</button><button class="btn" id="stop" style="background:#687989" disabled>DỪNG CAMERA</button><div id="reader"></div><div id="confirm"><div>Dây chuyền: <strong id="chosenDc"></strong></div><div>Mã nguyên liệu: <strong id="chosenCode"></strong></div><button class="btn" id="save">CẬP NHẬT</button><button class="btn" id="cancel" style="background:#687989">QUÉT LẠI</button></div><label>Dự phòng: nhập mã bằng tay</label><input id="manual" placeholder="Ví dụ: 001245" maxlength="100" autocomplete="off"><button class="btn" id="manualGo">XÁC NHẬN MÃ NHẬP TAY</button><p id="status" class="note" role="status" aria-live="polite"></p><p class="note">Chỉ cấp nguyên liệu khi hiện thông báo ĐÃ GHI NHẬN. Nếu mất mạng hoặc hết thời gian chờ, hãy kiểm tra dữ liệu trước khi thử lại.</p><iframe id="transport" name="transport"></iframe></main><script>
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycby9d-EKIJCLGmzOF-mcBFRVVrr5YGs6Ohhkt6mV9jdvxyG-m4suEKwyXPFJL7gdZhk/exec';
 const $=id=>document.getElementById(id);
 const validCode=x=>/^[A-Za-z0-9]{1,100}$/.test(x);
@@ -11,7 +11,9 @@ $('person').value=localStorage.getItem('qr_person')||'';
 $('person').addEventListener('change',()=>localStorage.setItem('qr_person',$('person').value.trim()));
 function status(s,kind='note'){$('status').textContent=s;$('status').className=kind;}
 function draw(){ $('lines').innerHTML='';for(let i=1;i<=9;i++){const name='DC'+String(i).padStart(2,'0');const b=document.createElement('button');b.className='dc'+(dc===name?' active':'');b.textContent=name;b.disabled=busy||!!pending;b.onclick=()=>{dc=name;localStorage.setItem('qr_dc',dc);draw()};$('lines').appendChild(b)}}draw();
-let cameraStarting=false;
+let cameraStarting=false, cameraRecovery=false;
+function videoLive(){const v=document.querySelector("#reader video");return !!(v && v.srcObject && v.srcObject.getVideoTracks().some(t=>t.readyState==="live") && v.readyState>=2 && !v.paused);}
+async function ensureCamera(){if(busy||pending||cameraRecovery)return; if(scanning&&videoLive())return; cameraRecovery=true;try{await stopCamera();await new Promise(r=>setTimeout(r,400));await startCamera();if(!scanning||!videoLive())status("Camera chưa sẵn sàng. Hãy mở trang bằng Safari và bấm BẬT CAMERA.","warn");}finally{cameraRecovery=false;}}
 let lastCompletedCode="", waitForDifferentCode=false;
 async function stopCamera(){
   clearTimeout(resumeTimer);
@@ -55,10 +57,8 @@ async function reset(message,kind='note'){
    $('save').disabled=false;$('cancel').disabled=false;draw();
    status(message,kind);
    // Camera vẫn đang chạy: chỉ mở khóa nhận QR mới.
-   if(scanning){$('reader').scrollIntoView({behavior:'smooth',block:'center'});return;}
-   // Chỉ thử khởi động nếu camera đã bị dừng từ trước.
-   await startCamera();
-   if(scanning)$('reader').scrollIntoView({behavior:'smooth',block:'center'});
+   if(!videoLive()) await ensureCamera();
+   if(videoLive())$('reader').scrollIntoView({behavior:'smooth',block:'center'});
 }
 function sendForm(payload){const form=document.createElement('form');form.method='POST';form.action=WEB_APP_URL;form.target='transport';form.style.display='none';for(const [key,value] of Object.entries(payload)){const field=document.createElement('input');field.name=key;field.value=value;form.appendChild(field);}document.body.appendChild(form);form.submit();form.remove();}
 function checkRecorded(req){
@@ -95,5 +95,7 @@ $('save').onclick=()=>{
   sendForm({id,ma:pending,dc,nguoi:person});
   pollingTimer=setTimeout(()=>checkRecorded(request),2000);
 };
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!busy&&!pending)setTimeout(ensureCamera,500)});
+setInterval(()=>{if(scanning&&!busy&&!pending&&!videoLive())ensureCamera()},3000);
 $('cancel').onclick=()=>{request=null;clearTimeout(pollingTimer);reset('Sẵn sàng quét mã tiếp theo.')};$('manualGo').onclick=()=>choose($('manual').value);$('start').onclick=startCamera;$('stop').onclick=()=>stopCamera().then(()=>status('Đã dừng camera.'));
 </script></body></html>
