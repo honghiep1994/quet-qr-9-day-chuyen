@@ -28,7 +28,7 @@
 </head>
 <body>
 <main>
-  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8</h2>
+  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.1</h2>
   <div id="server" role="status">Đang kiểm tra kết nối máy chủ...</div>
   <label>1. Chọn dây chuyền</label><div class="grid" id="lines"></div>
   <label for="person">2. Người xuất (nhập một lần)</label>
@@ -63,6 +63,16 @@ const validLine=x=>/^DC0[1-9]$/.test(x);
 let dc=localStorage.getItem('qr_dc')||'DC01';if(!validLine(dc))dc='DC01';
 let reader=null,scanning=false,cameraStarting=false,ready=false,pending='',busy=false;
 let request=null,lastHandledCode='',suppressLast=false,videoRecovering=false;
+function forceInlineVideo(){
+ const v=$('reader').querySelector('video');if(!v)return;
+ v.setAttribute('playsinline','');v.setAttribute('webkit-playsinline','');v.setAttribute('x5-playsinline','');
+ v.setAttribute('muted','');v.muted=true;v.setAttribute('autoplay','');
+ v.setAttribute('disablepictureinpicture','');v.disablePictureInPicture=true;
+ v.setAttribute('controlslist','nofullscreen noremoteplayback');v.controls=false;
+ v.style.setProperty('max-width','100%');
+}
+const inlineObserver=new MutationObserver(forceInlineVideo);inlineObserver.observe($('reader'),{childList:true,subtree:true});
+
 const activeChecks=new Set();
 $('person').value=localStorage.getItem('qr_person')||'';
 $('person').addEventListener('change',()=>localStorage.setItem('qr_person',$('person').value.trim()));
@@ -116,11 +126,11 @@ async function startCamera(){
   if(typeof Html5Qrcode==='undefined'){setStatus('Không tải được thư viện camera. Kiểm tra kết nối mạng.','warn');return}
   cameraStarting=true;$('start').disabled=true;
   try{
-    reader=new Html5Qrcode('reader');
+    reader=new Html5Qrcode('reader',{verbose:false});
     await reader.start({facingMode:'environment'},{fps:10,qrbox:{width:240,height:240}},code=>{
       if(!pending&&!busy&&!request)choose(code);
     },()=>{});
-    scanning=true;$('stop').disabled=false;
+    forceInlineVideo();scanning=true;$('stop').disabled=false;
     if(!pending&&!busy)setStatus('Camera đang hoạt động. Hướng vào QR cần cấp.');
   }catch(e){scanning=false;reader=null;$('start').disabled=false;$('stop').disabled=true;setStatus('Không mở được camera: '+(e.message||e),'warn')}
   finally{cameraStarting=false}
@@ -137,8 +147,8 @@ async function ensureVideo(){
   try{await stopCamera();await new Promise(r=>setTimeout(r,500));await startCamera()}
   finally{videoRecovering=false}
 }
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(ensureVideo,600)});
-setInterval(()=>{if(!document.hidden)ensureVideo()},4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(()=>{forceInlineVideo();ensureVideo()},600)});
+setInterval(()=>{if(!document.hidden){forceInlineVideo();ensureVideo()}},4000);
 function choose(value){
   const ma=String(value||'').trim();
   if(!validCode(ma)){setStatus('Mã QR chỉ được gồm chữ và số (tối đa 100 ký tự).','warn');return}
@@ -158,6 +168,7 @@ function clearSelection(message,kind='note'){
   pending='';busy=false;request=null;
   $('confirm').style.display='none';$('manual').value='';draw();
   setStatus(message,kind==='warn-duplicate'?'warn':kind);
+  forceInlineVideo();
   if(scanning&&liveVideo())$('reader').scrollIntoView({block:'center',behavior:'smooth'});
   else if(scanning)ensureVideo();
 }
