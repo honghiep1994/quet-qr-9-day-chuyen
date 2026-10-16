@@ -5,6 +5,7 @@ const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycby9d-EKIJCLGmzOF-mc
 const $=id=>document.getElementById(id);
 const validCode=x=>/^[A-Za-z0-9]{1,100}$/.test(x);
 let dc=localStorage.getItem('qr_dc')||'DC01',reader=null,scanning=false,busy=false,pending='',request=null;
+let pollingTimer=null;
 if(!/^DC0[1-9]$/.test(dc))dc='DC01';
 $('person').value=localStorage.getItem('qr_person')||'';
 $('person').addEventListener('change',()=>localStorage.setItem('qr_person',$('person').value.trim()));
@@ -15,7 +16,39 @@ async function startCamera(){if(scanning||busy||pending)return;if(typeof Html5Qr
 async function choose(value){const code=String(value||'').trim();if(!validCode(code)){status('Mã QR không hợp lệ.','warn');return;}if(pending||busy)return;pending=code;$('chosenDc').textContent=dc;$('chosenCode').textContent=code;$('confirm').style.display='block';draw();await stopCamera();status('Đã quét '+code+'. Kiểm tra và nhấn CẬP NHẬT.');}
 async function reset(message,kind='note'){pending='';busy=false;$('confirm').style.display='none';$('manual').value='';$('save').disabled=false;$('cancel').disabled=false;draw();status(message,kind);await startCamera();if(message)status(message,kind);}
 function sendForm(payload){const form=document.createElement('form');form.method='POST';form.action=WEB_APP_URL;form.target='transport';form.style.display='none';for(const [key,value] of Object.entries(payload)){const field=document.createElement('input');field.name=key;field.value=value;form.appendChild(field);}document.body.appendChild(form);form.submit();form.remove();}
-$('save').onclick=()=>{if(!pending||busy)return;const person=$('person').value.trim();if(!person||person.length>100||/[\x00-\x1f]/.test(person)){status('Nhập tên người xuất hợp lệ.','warn');$('person').focus();return;}localStorage.setItem('qr_person',person);if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(WEB_APP_URL)){status('URL Apps Script chưa hợp lệ.','warn');return;}busy=true;draw();$('save').disabled=true;$('cancel').disabled=true;const nonce=crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random();const id=crypto.randomUUID?crypto.randomUUID():String(Date.now())+'-'+Math.random().toString(36).slice(2);request={nonce,id,code:pending,dc};status('Đang gửi dữ liệu tới Google Sheets...');sendForm({nonce,id,ma:pending,dc,nguoi:person});setTimeout(()=>{if(request&&request.nonce===nonce){status('Chưa nhận được xác nhận từ máy chủ. KHÔNG quét lại mã này ngay; hãy kiểm tra Google Sheets rồi nhấn QUÉT LẠI nếu cần.','warn');busy=false;$('cancel').disabled=false;$('save').disabled=false;draw();}},20000);};
-window.addEventListener('message',async event=>{if(!request||!event.data||event.data.type!=='CAP_NGUYEN_LIEU_RESULT'||event.data.nonce!==request.nonce)return;if(!/^https:\/\/(script\.google\.com|[a-z0-9-]+\.googleusercontent\.com)$/.test(event.origin))return;const result=event.data.result;request=null;busy=false;if(result&&result.ok){await reset((result.daLuuTruoc?'ĐÃ GHI NHẬN TRƯỚC ĐÓ':'ĐÃ GHI NHẬN THÀNH CÔNG')+' — '+result.ma+' / '+result.dc,'success');}else{ $('save').disabled=true;$('cancel').disabled=false;draw();status(result&&result.trung?'MÃ ĐÃ ĐƯỢC CẤP tại '+result.dc+' lúc '+result.thoigian:'Lỗi: '+(result&&result.error||'Không xác định'),'warn');}});
-$('cancel').onclick=()=>{request=null;reset('Sẵn sàng quét mã tiếp theo.')};$('manualGo').onclick=()=>choose($('manual').value);$('start').onclick=startCamera;$('stop').onclick=()=>stopCamera().then(()=>status('Đã dừng camera.'));
+function checkRecorded(req){
+  if(!request||request.id!==req.id)return;
+  const cb='qrCallback_'+req.id.replace(/-/g,'_');
+  const script=document.createElement('script');
+  const cleanup=()=>{script.remove();delete window[cb]};
+  window[cb]=async result=>{
+    cleanup();
+    if(!request||request.id!==req.id)return;
+    if(result&&result.found){
+      request=null;clearTimeout(pollingTimer);
+      await reset('ĐÃ GHI NHẬN THÀNH CÔNG — '+result.ma+' / '+result.dc,'success');
+    }else if(Date.now()-req.started<45000){
+      pollingTimer=setTimeout(()=>checkRecorded(req),2500);
+    }else{
+      busy=false;$('save').disabled=true;$('cancel').disabled=false;draw();
+      status('CHƯA XÁC MINH ĐƯỢC kết quả. Kiểm tra Google Sheets trước khi thao tác tiếp. Không nhấn CẬP NHẬT lần nữa.','warn');
+    }
+  };
+  script.onerror=()=>{cleanup();if(request&&request.id===req.id){if(Date.now()-req.started<45000)pollingTimer=setTimeout(()=>checkRecorded(req),3000);else{busy=false;$('save').disabled=true;$('cancel').disabled=false;status('Không kiểm tra được trạng thái máy chủ. Hãy xem Google Sheets.','warn');}}};
+  script.src=WEB_APP_URL+'?callback='+encodeURIComponent(cb)+'&id='+encodeURIComponent(req.id)+'&_='+Date.now();
+  document.head.appendChild(script);
+}
+$('save').onclick=()=>{
+  if(!pending||busy||request)return;
+  const person=$('person').value.trim();
+  if(!person||person.length>100||/[\x00-\x1f]/.test(person)){status('Nhập tên người xuất hợp lệ.','warn');$('person').focus();return;}
+  localStorage.setItem('qr_person',person);
+  busy=true;draw();$('save').disabled=true;$('cancel').disabled=true;
+  const id=crypto.randomUUID?crypto.randomUUID():String(Date.now())+'-'+Math.random().toString(36).slice(2);
+  request={id,code:pending,dc,started:Date.now()};
+  status('Đang ghi nhận và kiểm tra kết quả trên Google Sheets...');
+  sendForm({id,ma:pending,dc,nguoi:person});
+  pollingTimer=setTimeout(()=>checkRecorded(request),2000);
+};
+$('cancel').onclick=()=>{request=null;clearTimeout(pollingTimer);reset('Sẵn sàng quét mã tiếp theo.')};$('manualGo').onclick=()=>choose($('manual').value);$('start').onclick=startCamera;$('stop').onclick=()=>stopCamera().then(()=>status('Đã dừng camera.'));
 </script></body></html>
