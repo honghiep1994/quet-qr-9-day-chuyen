@@ -61,32 +61,62 @@ async function reset(message,kind='note'){
    if(videoLive())$('reader').scrollIntoView({behavior:'smooth',block:'center'});
 }
 function sendForm(payload){const form=document.createElement('form');form.method='POST';form.action=WEB_APP_URL;form.target='transport';form.style.display='none';for(const [key,value] of Object.entries(payload)){const field=document.createElement('input');field.name=key;field.value=value;form.appendChild(field);}document.body.appendChild(form);form.submit();form.remove();}
+// V7: nhan ket qua POST truc tiep; JSONP la kenh du phong.
+let activeScript=null, activeCallback='', probeTimeout=null, hardTimeout=null, nextProbe=null;
+function clearProbe(){
+  clearTimeout(probeTimeout);clearTimeout(nextProbe);
+  if(activeScript){activeScript.remove();activeScript=null;}
+  if(activeCallback){try{delete window[activeCallback]}catch(e){} activeCallback='';}
+}
+function finishRequest(){clearProbe();clearTimeout(hardTimeout);hardTimeout=null;clearTimeout(pollingTimer);pollingTimer=null;request=null;}
+function unresolved(reason){
+  if(!request)return;
+  finishRequest();busy=false;$('save').disabled=true;$('cancel').disabled=false;draw();
+  status('CHƯA XÁC MINH ĐƯỢC KẾT QUẢ. '+reason+'\nHãy kiểm tra Google Sheets trước khi quét hoặc gửi lại mã này.','warn');
+}
+async function handleResult(req,result){
+  if(!request||request.id!==req.id||!result)return;
+  if(result.found || result.ok===true){
+    const ma=result.ma||req.code, line=result.dc||req.dc;
+    finishRequest();await reset('ĐÃ GHI NHẬN THÀNH CÔNG — '+ma+' / '+line,'success');return;
+  }
+  if(result.trung){
+    finishRequest();lastCompletedCode=req.code;waitForDifferentCode=true;
+    pending='';busy=false;$('confirm').style.display='none';$('save').disabled=false;$('cancel').disabled=false;draw();
+    status('CẢNH BÁO: MÃ ĐÃ ĐƯỢC CẤP — '+req.code+' / '+(result.dc||'không rõ')+'\nNgười xuất: '+(result.nguoi||'Không rõ')+'\nThời gian: '+(result.thoigian||'Không rõ')+'\nKhông ghi thêm. Đưa mã khác vào camera.','warn');
+    if(!videoLive())ensureCamera();else $('reader').scrollIntoView({behavior:'smooth',block:'center'});
+    return;
+  }
+  if(result.error){unresolved('Máy chủ báo lỗi: '+result.error);}
+}
+window.addEventListener('message',event=>{
+  if(!request||!event.origin||!/^https:\/\/(?:script\.google\.com|[a-z0-9-]+\.googleusercontent\.com)$/.test(event.origin))return;
+  const data=event.data;
+  if(!data||data.type!=='CAP_NGUYEN_LIEU_RESULT'||data.nonce!==request.id)return;
+  const req=request;
+  if(data.result){
+    if(data.result.ok===false&&!data.result.trung){unresolved('Máy chủ báo lỗi: '+(data.result.error||'Không rõ nguyên nhân'));return;}
+    handleResult(req,data.result);
+  }
+});
 function checkRecorded(req){
   if(!request||request.id!==req.id)return;
-  const cb='qrCallback_'+req.id.replace(/-/g,'_');
-  const script=document.createElement('script');
-  const cleanup=()=>{script.remove();delete window[cb]};
-  window[cb]=async result=>{
-    cleanup();
-    if(!request||request.id!==req.id)return;
-    if(result&&result.found){
-      request=null;clearTimeout(pollingTimer);
-      await reset('ĐÃ GHI NHẬN THÀNH CÔNG — '+result.ma+' / '+result.dc,'success');
-    }else if(result&&result.trung){
-      request=null;clearTimeout(pollingTimer);
-      const old=pending; pending='';busy=false;
-      $('confirm').style.display='none';$('save').disabled=false;$('cancel').disabled=false;draw();
-      lastCompletedCode=old;waitForDifferentCode=true;
-      status('MÃ ĐÃ ĐƯỢC CẤP TRƯỚC ĐÓ: '+result.ma+' / '+result.dc+'\nNgười xuất: '+(result.nguoi||'Không rõ')+'\nThời gian: '+(result.thoigian||'Không rõ')+'\nKhông ghi thêm. Đưa mã khác vào camera để tiếp tục.','warn');
-      if(!videoLive())ensureCamera();else $('reader').scrollIntoView({behavior:'smooth',block:'center'});
-    }else if(Date.now()-req.started<45000){
-      pollingTimer=setTimeout(()=>checkRecorded(req),2500);
-    }else{
-      busy=false;$('save').disabled=true;$('cancel').disabled=false;draw();
-      status('CHƯA XÁC MINH ĐƯỢC kết quả. Kiểm tra Google Sheets trước khi thao tác tiếp. Không nhấn CẬP NHẬT lần nữa.','warn');
-    }
+  clearProbe();
+  const cb='qrCallback_'+req.id.replace(/-/g,'_');activeCallback=cb;
+  const script=document.createElement('script');activeScript=script;
+  let settled=false;
+  const retry=()=>{
+    if(settled)return;settled=true;clearProbe();
+    if(request&&request.id===req.id)nextProbe=setTimeout(()=>checkRecorded(req),2500);
   };
-  script.onerror=()=>{cleanup();if(request&&request.id===req.id){if(Date.now()-req.started<45000)pollingTimer=setTimeout(()=>checkRecorded(req),3000);else{busy=false;$('save').disabled=true;$('cancel').disabled=false;status('Không kiểm tra được trạng thái máy chủ. Hãy xem Google Sheets.','warn');}}};
+  window[cb]=result=>{
+    if(settled)return;settled=true;clearProbe();
+    if(!request||request.id!==req.id)return;
+    if(result&&(result.found||result.trung||result.error))handleResult(req,result);
+    else nextProbe=setTimeout(()=>checkRecorded(req),2500);
+  };
+  script.onerror=retry;
+  probeTimeout=setTimeout(retry,6000); // khong cho script tai vo han
   script.src=WEB_APP_URL+'?callback='+encodeURIComponent(cb)+'&id='+encodeURIComponent(req.id)+'&ma='+encodeURIComponent(req.code)+'&_='+Date.now();
   document.head.appendChild(script);
 }
@@ -96,12 +126,21 @@ $('save').onclick=()=>{
   if(!person||person.length>100||/[\x00-\x1f]/.test(person)){status('Nhập tên người xuất hợp lệ.','warn');$('person').focus();return;}
   localStorage.setItem('qr_person',person);
   busy=true;draw();$('save').disabled=true;$('cancel').disabled=true;
-  const id=crypto.randomUUID?crypto.randomUUID():String(Date.now())+'-'+Math.random().toString(36).slice(2);
+  const id=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+'-'+Math.random().toString(36).slice(2));
   request={id,code:pending,dc,started:Date.now()};
   status('Đang ghi nhận và kiểm tra kết quả trên Google Sheets...');
-  sendForm({id,ma:pending,dc,nguoi:person});
-  pollingTimer=setTimeout(()=>checkRecorded(request),2000);
+  hardTimeout=setTimeout(()=>unresolved('Đã quá 35 giây mà chưa nhận được phản hồi xác thực.'),35000);
+  try{sendForm({id,nonce:id,ma:pending,dc,nguoi:person});}
+  catch(e){unresolved('Không gửi được yêu cầu: '+(e.message||e));return;}
+  pollingTimer=setTimeout(()=>{if(request&&request.id===id)checkRecorded(request)},2500);
 };
+$('cancel').onclick=()=>{
+  if(request){unresolved('Giao dịch vừa gửi có thể đã ghi nhận.');return;}
+  clearProbe();clearTimeout(hardTimeout);reset('Sẵn sàng quét mã tiếp theo.');
+};
+$('manualGo').onclick=()=>choose($('manual').value);
+$('start').onclick=startCamera;
+$('stop').onclick=()=>stopCamera().then(()=>status('Đã dừng camera.'));
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!busy&&!pending)setTimeout(ensureCamera,500)});
 setInterval(()=>{if(scanning&&!busy&&!pending&&!videoLive())ensureCamera()},3000);
 $('cancel').onclick=()=>{request=null;clearTimeout(pollingTimer);reset('Sẵn sàng quét mã tiếp theo.')};$('manualGo').onclick=()=>choose($('manual').value);$('start').onclick=startCamera;$('stop').onclick=()=>stopCamera().then(()=>status('Đã dừng camera.'));
