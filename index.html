@@ -11,10 +11,56 @@ $('person').value=localStorage.getItem('qr_person')||'';
 $('person').addEventListener('change',()=>localStorage.setItem('qr_person',$('person').value.trim()));
 function status(s,kind='note'){$('status').textContent=s;$('status').className=kind;}
 function draw(){ $('lines').innerHTML='';for(let i=1;i<=9;i++){const name='DC'+String(i).padStart(2,'0');const b=document.createElement('button');b.className='dc'+(dc===name?' active':'');b.textContent=name;b.disabled=busy||!!pending;b.onclick=()=>{dc=name;localStorage.setItem('qr_dc',dc);draw()};$('lines').appendChild(b)}}draw();
-async function stopCamera(){if(!reader||!scanning)return;try{await reader.stop();reader.clear()}catch(e){}scanning=false;$('start').disabled=false;$('stop').disabled=true;}
-async function startCamera(){if(scanning||busy||pending)return;if(typeof Html5Qrcode==='undefined'){status('Không tải được thư viện quét QR.','warn');return;}try{reader=new Html5Qrcode('reader');await reader.start({facingMode:'environment'},{fps:10,qrbox:{width:240,height:240}},code=>{if(!busy&&!pending)choose(code)},()=>{});scanning=true;$('start').disabled=true;$('stop').disabled=false;status('Camera đã mở. Đưa mã QR vào khung hình.')}catch(e){status('Không mở được camera: '+(e.message||e),'warn')}}
-async function choose(value){const code=String(value||'').trim();if(!validCode(code)){status('Mã QR không hợp lệ.','warn');return;}if(pending||busy)return;pending=code;$('chosenDc').textContent=dc;$('chosenCode').textContent=code;$('confirm').style.display='block';draw();await stopCamera();status('Đã quét '+code+'. Kiểm tra và nhấn CẬP NHẬT.');}
-async function reset(message,kind='note'){pending='';busy=false;$('confirm').style.display='none';$('manual').value='';$('save').disabled=false;$('cancel').disabled=false;draw();status(message,kind);await startCamera();if(message)status(message,kind);}
+let cameraStarting=false,resumeTimer=null;
+async function stopCamera(){
+  clearTimeout(resumeTimer);
+  if(reader){
+    try{if(scanning)await reader.stop()}catch(e){}
+    try{reader.clear()}catch(e){}
+  }
+  reader=null;scanning=false;cameraStarting=false;
+  $('start').disabled=false;$('stop').disabled=true;
+}
+async function startCamera(){
+  if(scanning||cameraStarting||busy||pending)return;
+  if(typeof Html5Qrcode==='undefined'){status('Không tải được thư viện quét QR.','warn');return;}
+  cameraStarting=true;$('start').disabled=true;
+  try{
+    reader=new Html5Qrcode('reader');
+    await reader.start({facingMode:'environment'},{fps:10,qrbox:{width:240,height:240}},code=>{if(!busy&&!pending)choose(code)},()=>{});
+    scanning=true;$('stop').disabled=false;
+    status('Camera đã mở. Đưa mã QR vào khung hình.');
+  }catch(e){
+    scanning=false;reader=null;$('start').disabled=false;$('stop').disabled=true;
+    status('Không thể tự mở lại camera: '+(e.message||e)+'. Hãy bấm BẬT CAMERA để thử lại.','warn');
+  }finally{cameraStarting=false;}
+}
+async function choose(value){
+  const code=String(value||'').trim();
+  if(!validCode(code)){status('Mã QR không hợp lệ.','warn');return;}
+  if(pending||busy)return;
+  pending=code;$('chosenDc').textContent=dc;$('chosenCode').textContent=code;
+  $('confirm').style.display='block';draw();
+  await stopCamera();
+  $('confirm').scrollIntoView({behavior:'smooth',block:'center'});
+  status('Đã quét '+code+'. Kiểm tra và nhấn CẬP NHẬT.');
+}
+async function reset(message,kind='note'){
+  pending='';busy=false;request=null;
+  $('confirm').style.display='none';$('manual').value='';
+  $('save').disabled=false;$('cancel').disabled=false;draw();
+  status(message,kind);
+  // iOS WebKit cần nhả camera cũ trước khi khởi động luồng mới.
+  await stopCamera();
+  resumeTimer=setTimeout(async()=>{
+    if(busy||pending)return;
+    await startCamera();
+    if(scanning){
+      $('reader').scrollIntoView({behavior:'smooth',block:'center'});
+      status(message+' — Camera đã sẵn sàng quét mã tiếp theo.',kind);
+    }
+  },1200);
+}
 function sendForm(payload){const form=document.createElement('form');form.method='POST';form.action=WEB_APP_URL;form.target='transport';form.style.display='none';for(const [key,value] of Object.entries(payload)){const field=document.createElement('input');field.name=key;field.value=value;form.appendChild(field);}document.body.appendChild(form);form.submit();form.remove();}
 function checkRecorded(req){
   if(!request||request.id!==req.id)return;
