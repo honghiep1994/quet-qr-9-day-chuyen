@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Quét QR cấp nguyên liệu - V8.8</title>
+  <title>Quét QR cấp nguyên liệu - V8.9</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <style>
@@ -34,8 +34,24 @@
 </head>
 <body>
 <main>
-  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.8</h2>
+  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.9</h2>
   <div id="server" role="status">Đang kiểm tra kết nối máy chủ...</div>
+  <section id="authPanel" class="tools" style="background:#e6f1ff;border:1px solid #a8c5e3">
+    <strong>ĐĂNG NHẬP NHÂN VIÊN</strong>
+    <div id="authLogin">
+      <label for="employee">Mã nhân viên</label><input id="employee" autocomplete="username" placeholder="NV001">
+      <label for="pin">Mã PIN cá nhân (6–12 số)</label><input id="pin" type="password" inputmode="numeric" autocomplete="current-password">
+      <button class="btn" id="loginBtn" type="button">ĐĂNG NHẬP</button>
+    </div>
+    <div id="authChange" style="display:none">
+      <b>BẮT BUỘC ĐỔI PIN LẦN ĐẦU</b>
+      <label for="oldPin">PIN hiện tại</label><input id="oldPin" type="password" inputmode="numeric">
+      <label for="newPin">PIN mới (6–12 số)</label><input id="newPin" type="password" inputmode="numeric">
+      <button class="btn" id="changePinBtn" type="button">ĐỔI PIN VÀ TIẾP TỤC</button>
+    </div>
+    <div id="authActive" style="display:none"><b id="authWho"></b><button type="button" class="btn muted" id="logoutBtn">ĐĂNG XUẤT</button><button type="button" class="btn muted" id="showPinChange">ĐỔI PIN</button></div>
+    <div id="authStatus" role="status" class="hint">Đăng nhập để cấp hoặc hủy nguyên liệu. Thống kê vẫn có thể xem.</div>
+  </section>
   <label>1. Chọn dây chuyền</label><div class="grid" id="lines"></div>
   <section id="statsPanel" style="background:#e8f5ee;border:1px solid #c1e3ce;border-radius:12px;padding:14px;margin:12px 0" aria-live="polite">
     <div style="font-weight:bold">THỐNG KÊ CẤP NGUYÊN LIỆU TRONG NGÀY</div>
@@ -48,8 +64,7 @@
     <div class="small" id="statsState">Dữ liệu từ Google Sheets</div>
     <button type="button" id="statsRefresh" style="margin-top:9px;padding:9px 14px;border:0;border-radius:8px;background:#315a78;color:white;font-weight:bold">↻ LÀM MỚI THỐNG KÊ</button>
   </section>
-  <label for="person">2. Người xuất (nhập một lần)</label>
-  <input id="person" placeholder="Họ tên người xuất" maxlength="100" autocomplete="name">
+  <input id="person" type="hidden">
   <label>3. Quét mã QR</label>
   <button class="btn" id="start" type="button">BẬT CAMERA QUÉT QR</button>
   <button class="btn muted" id="stop" type="button" disabled>DỪNG CAMERA</button>
@@ -95,7 +110,7 @@
 <script>
 'use strict';
 const WEB_APP_URL='https://script.google.com/macros/s/AKfycby9d-EKIJCLGmzOF-mcBFRVVrr5YGs6Ohhkt6mV9jdvxyG-m4suEKwyXPFJL7gdZhk/exec';
-const EXPECTED_VERSION='QR-V8.8-20261017';
+const EXPECTED_VERSION='QR-V8.9-20261017';
 const $=id=>document.getElementById(id);
 const validCode=x=>/^[A-Za-z0-9]{1,100}$/.test(x);
 const validLine=x=>/^DC0[1-9]$/.test(x);
@@ -121,8 +136,8 @@ function forceInlineVideo(){
 const inlineObserver=new MutationObserver(forceInlineVideo);inlineObserver.observe($('reader'),{childList:true,subtree:true});
 
 const activeChecks=new Set();
-$('person').value=localStorage.getItem('qr_person')||'';
-$('person').addEventListener('change',()=>localStorage.setItem('qr_person',$('person').value.trim()));
+$('person').value='';
+
 function setStatus(s,kind='note'){$('status').textContent=s;$('status').className=kind;}
 function draw(){
   $('lines').replaceChildren();
@@ -305,7 +320,7 @@ function choose(value){
     // Mã có thể đã được hủy trên điện thoại khác: tra cứu nền để mở lại quyền cấp.
     if(!checkingCachedCodes.has(ma)){
       checkingCachedCodes.add(ma);
-      jsonp('lookup',{ma},15000).then(r=>{
+      jsonp('lookup',{ma,token:authToken},15000).then(r=>{
         if(r&&r.ok&&(!r.found||r.status==='ĐÃ HỦY')){
           confirmedCodes.delete(ma);
           setStatus('Mã '+ma+' đã hủy trên hệ thống, có thể quét lại để cấp mới.','note');
@@ -378,7 +393,7 @@ async function poll(req,limitMs){
   const started=Date.now();let lastError='';
   while(request&&request.id===req.id&&req.phase==='checking'&&Date.now()-started<limitMs){
     try{
-      const result=await jsonp('check',{id:req.id,ma:req.ma},9000);
+      const result=await jsonp('check',{id:req.id,ma:req.ma,token:authToken},9000);
       if(!request||request.id!==req.id)return;
       if(closeOutcome(req,result))return;
     }catch(e){lastError=String(e.message||e)}
@@ -389,19 +404,53 @@ async function poll(req,limitMs){
 }
 $('save').onclick=async()=>{
   if(!pending||busy||request)return;
+  if(!authReady()){setStatus('Đăng nhập và đổi PIN trước khi cấp nguyên liệu.','warn');return;}
   if(!ready){setStatus('Máy chủ chưa sẵn sàng. Nhấn KIỂM TRA KẾT NỐI trước khi cập nhật.','warn');return}
   const person=$('person').value.trim();
-  if(!person||person.length>100||/[\x00-\x1f]/.test(person)){setStatus('Vui lòng nhập tên người xuất hợp lệ.','warn');$('person').focus();return}
-  localStorage.setItem('qr_person',person);
+  if(!person){setStatus('Chưa đăng nhập.','warn');return;}
+  
   const id=crypto.randomUUID?crypto.randomUUID():'tx-'+Date.now()+'-'+Math.random().toString(36).slice(2);
   const req={id,ma:pending,dc,phase:'checking'};
   request=req;busy=true;draw();$('save').disabled=true;$('cancel').disabled=true;
   setStatus('Đang gửi và chờ máy chủ xác nhận mã '+pending+'...','wait');
-  try{submitPost({id,nonce:id,ma:pending,dc,nguoi:person})}
+  try{submitPost({id,nonce:id,ma:pending,dc,nguoi:person,token:authToken})}
   catch(e){uncertain(req,'Không gửi được yêu cầu: '+(e.message||e));return}
   await new Promise(r=>setTimeout(r,1800));
   poll(req,36000);
 };
+let authToken=localStorage.getItem('qr_auth_token')||'',authUser=null,authPending=null;
+function authReady(){return !!(authToken&&authUser&&!authUser.mustChange);}
+function authDisplay(){
+ $('authLogin').style.display=authUser?'none':'block';
+ $('authChange').style.display=authUser&&authUser.mustChange?'block':'none';
+ $('authActive').style.display=authReady()?'block':'none';
+ $('authWho').textContent=authUser?authUser.employee+' – '+authUser.name:'';
+ $('person').value=authUser?authUser.employee+' - '+authUser.name:'';
+ $('authStatus').textContent=authUser?(authUser.mustChange?'Cần đổi PIN trước khi cấp/hủy.':'Đã xác thực nhân viên '+authUser.name):'Vui lòng đăng nhập để cấp/hủy.';
+}
+function authSend(action,fields){
+ if(authPending)return;
+ const nonce=crypto.randomUUID?crypto.randomUUID():'auth-'+Date.now();
+ authPending={nonce,action};$('authStatus').textContent='Đang xác thực...';
+ submitPost({action,nonce,token:authToken,...fields});
+ setTimeout(()=>{if(authPending&&authPending.nonce===nonce){authPending=null;$('authStatus').textContent='Không nhận được phản hồi. Kiểm tra mạng và thử lại.';}},16000);
+}
+$('loginBtn').onclick=()=>authSend('login',{employee:$('employee').value.trim(),pin:$('pin').value});
+$('changePinBtn').onclick=()=>authSend('changePin',{oldPin:$('oldPin').value,newPin:$('newPin').value});
+$('showPinChange').onclick=()=>{if(authUser){authUser.mustChange=true;authDisplay();}};
+$('logoutBtn').onclick=()=>{authSend('logout',{});};
+async function authRestore(){if(!authToken){authDisplay();return;}try{const r=await jsonp('session',{token:authToken},12000);if(!r.ok)throw Error(r.error);authUser=r;authDisplay();}catch(e){authToken='';authUser=null;localStorage.removeItem('qr_auth_token');authDisplay();}}
+window.addEventListener('message',event=>{
+ if(!event.origin||!/^https:\/\/(?:script\.google\.com|[a-z0-9-]+\.googleusercontent\.com)$/.test(event.origin))return;
+ const d=event.data;if(!authPending||!d||d.type!=='CAP_NGUYEN_LIEU_RESULT'||d.nonce!==authPending.nonce)return;
+ const a=authPending.action;authPending=null;const r=d.result||{};
+ if(!r.ok){$('authStatus').textContent='Lỗi: '+(r.error||'Xác thực thất bại');return;}
+ if(a==='login'){authToken=r.token;localStorage.setItem('qr_auth_token',authToken);authUser=r;$('pin').value='';}
+ else if(a==='changePin'){authUser={...authUser,mustChange:false};$('oldPin').value='';$('newPin').value='';}
+ else if(a==='logout'){authToken='';authUser=null;localStorage.removeItem('qr_auth_token');}
+ authDisplay();
+});
+authRestore();
 window.addEventListener('message',event=>{
   if(cancelReq&&event.origin&&/^https:\/\/(?:script\.google\.com|[a-z0-9-]+\.googleusercontent\.com)$/.test(event.origin)){
     const d=event.data;if(d&&d.type==='CAP_NGUYEN_LIEU_RESULT'&&d.nonce===cancelReq.id){
@@ -442,7 +491,7 @@ $('cancelLookup').onclick=async()=>{
  cancelReset();const ma=$('cancelCode').value.trim();
  if(!validCode(ma)){cancelMessage('Mã chỉ gồm chữ và số, tối đa 100 ký tự.');return;}
  cancelBusy=true;$('cancelLookup').disabled=true;cancelMessage('Đang tra cứu mã...');
- try{const r=await jsonp('lookup',{ma},15000);
+ try{const r=await jsonp('lookup',{ma,token:authToken},15000);
   if(!r.ok)throw Error(r.error||'Không tra cứu được');
   if(!r.found){cancelMessage('MÃ CHƯA TỪNG ĐƯỢC GHI NHẬN.');return;}
   if(r.status==='ĐÃ HỦY'){cancelMessage('MÃ ĐÃ HỦY TRƯỚC ĐÓ: '+ma+' / '+r.dc);return;}
@@ -453,7 +502,7 @@ $('cancelLookup').onclick=async()=>{
 };
 async function cancelCheck(){
  if(!cancelReq)return;const req=cancelReq;
- try{const r=await jsonp('check',{mode:'cancel',id:req.id,ma:req.ma},15000);
+ try{const r=await jsonp('check',{mode:'cancel',id:req.id,ma:req.ma,token:authToken},15000);
   if(r.ok&&r.cancelled&&r.id===req.id){cancelComplete(req);return;}
   if(r.error){cancelMessage('CHƯA XÁC MINH HỦY: '+r.error);return;}
   cancelMessage('CHƯA THẤY GIAO DỊCH HỦY TRÊN SHEETS. Kiểm tra trực tiếp Google Sheets trước khi đóng.');
@@ -468,16 +517,17 @@ function cancelComplete(req){
 }
 $('cancelSubmit').onclick=async()=>{
  if(cancelBusy||cancelReq||busy||request||!cancelFound)return;
+ if(!authReady()){cancelMessage('Vui lòng đăng nhập và đổi PIN trước khi hủy.');return;}
  if(!ready){cancelMessage('Máy chủ chưa kết nối.');return;}
  const nguoi=$('person').value.trim(),lydo=$('cancelReason').value.trim();
- if(!nguoi){cancelMessage('Nhập tên người thực hiện tại mục Người xuất.');return;}
+ if(!nguoi){cancelMessage('Chưa đăng nhập.');return;}
  if(lydo.length<5||lydo.length>300){cancelMessage('Bắt buộc nhập lý do hủy từ 5 đến 300 ký tự.');return;}
  if(!window.confirm('Xác nhận HỦY CẤP mã '+cancelFound.ma+' tại '+cancelFound.dc+'?\nLý do: '+lydo))return;
  const id=crypto.randomUUID?crypto.randomUUID():'tx-'+Date.now()+'-'+Math.random().toString(36).slice(2);
  const req={id,ma:cancelFound.ma,dc:cancelFound.dc};cancelReq=req;cancelBusy=true;
  $('cancelSubmit').disabled=true;$('cancelRecheck').style.display='block';
  cancelMessage('Đang gửi yêu cầu hủy, chờ xác minh...');
- try{submitPost({action:'cancel',id,nonce:id,ma:req.ma,nguoi,lydo});}
+ try{submitPost({action:'cancel',id,nonce:id,ma:req.ma,nguoi,lydo,token:authToken});}
  catch(e){cancelMessage('Chưa xác minh hủy: '+String(e.message||e));}
  setTimeout(async()=>{if(cancelReq&&cancelReq.id===id){await cancelCheck();cancelBusy=false;$('cancelSubmit').disabled=true;}},2000);
 };
