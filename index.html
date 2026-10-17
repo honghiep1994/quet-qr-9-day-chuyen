@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Quét QR cấp nguyên liệu - V8.5</title>
+  <title>Quét QR cấp nguyên liệu - V8.7</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <style>
@@ -34,9 +34,20 @@
 </head>
 <body>
 <main>
-  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.5</h2>
+  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.7</h2>
   <div id="server" role="status">Đang kiểm tra kết nối máy chủ...</div>
   <label>1. Chọn dây chuyền</label><div class="grid" id="lines"></div>
+  <section id="statsPanel" style="background:#e8f5ee;border:1px solid #c1e3ce;border-radius:12px;padding:14px;margin:12px 0" aria-live="polite">
+    <div style="font-weight:bold">THỐNG KÊ CẤP NGUYÊN LIỆU TRONG NGÀY</div>
+    <label for="statsPicker" style="margin:8px 0 4px">Chọn ngày cần thống kê</label>
+    <input type="date" id="statsPicker" style="padding:10px;width:100%;font-size:17px">
+    <div style="font-size:13px;color:#526b60" id="statsDate">Đang tải dữ liệu...</div>
+    <div id="statsAnnouncement" role="status" style="font-size:17px;font-weight:bold;color:#176b42;padding:10px 0">Đang lấy số tép đã cấp...</div>
+    <div style="font-size:18px;margin:9px 0">Dây chuyền <b id="statsDc">DC01</b>: <strong id="statsLine" style="font-size:29px;color:#176b42">—</strong> tép</div>
+    <div>Tổng 9 dây chuyền: <b id="statsTotal">—</b> tép</div>
+    <div class="small" id="statsState">Dữ liệu từ Google Sheets</div>
+    <button type="button" id="statsRefresh" style="margin-top:9px;padding:9px 14px;border:0;border-radius:8px;background:#315a78;color:white;font-weight:bold">↻ LÀM MỚI THỐNG KÊ</button>
+  </section>
   <label for="person">2. Người xuất (nhập một lần)</label>
   <input id="person" placeholder="Họ tên người xuất" maxlength="100" autocomplete="name">
   <label>3. Quét mã QR</label>
@@ -75,6 +86,9 @@ const $=id=>document.getElementById(id);
 const validCode=x=>/^[A-Za-z0-9]{1,100}$/.test(x);
 const validLine=x=>/^DC0[1-9]$/.test(x);
 let dc=localStorage.getItem('qr_dc')||'DC01';if(!validLine(dc))dc='DC01';
+let dailyStats=null,statsInFlight=false,statsLastAt=0,statsReload=false;
+const vnDate=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+$('statsPicker').value=vnDate();
 let reader=null,scanning=false,cameraStarting=false,ready=false,pending='',busy=false;
 let request=null,lastHandledCode='',suppressLast=false,videoRecovering=false;
 const confirmedCodes=new Set();
@@ -101,11 +115,35 @@ function draw(){
     const line='DC'+String(i).padStart(2,'0'),btn=document.createElement('button');
     btn.type='button';btn.className='dc'+(dc===line?' active':'');btn.textContent=line;
     btn.disabled=!!pending||busy;
-    btn.onclick=()=>{dc=line;localStorage.setItem('qr_dc',dc);draw()};
+    btn.onclick=()=>{dc=line;localStorage.setItem('qr_dc',dc);draw();showStats();refreshStats();};
     $('lines').appendChild(btn);
   }
 }
 draw();
+function showStats(){
+ $('statsDc').textContent=dc;
+ $('statsLine').textContent=dailyStats&&dailyStats.isoDate===$('statsPicker').value&&dailyStats.counts?String(dailyStats.counts[dc]??0):'—';
+ $('statsTotal').textContent=dailyStats&&dailyStats.isoDate===$('statsPicker').value?String(dailyStats.total):'—';
+ $('statsDate').textContent=dailyStats&&dailyStats.isoDate===$('statsPicker').value?'Ngày '+dailyStats.date+' (giờ '+dailyStats.timezone+')':'Đang tải dữ liệu ngày đã chọn...';
+ const valid=dailyStats&&dailyStats.isoDate===$('statsPicker').value&&dailyStats.counts;
+ $('statsAnnouncement').textContent=valid?'THÔNG BÁO: '+dc+' ĐÃ CẤP '+(dailyStats.counts[dc]??0)+' TÉP NGUYÊN LIỆU NGÀY '+dailyStats.date:'Đang lấy số tép đã cấp cho '+dc+'...';
+}
+async function refreshStats(){
+ if(statsInFlight){statsReload=true;return;}
+ const selectedDate=$('statsPicker').value;
+ if(!selectedDate)return;
+ statsInFlight=true;$('statsRefresh').disabled=true;$('statsState').textContent='Đang đồng bộ thống kê...';
+ try{
+  const data=await jsonp('stats',{date:selectedDate},20000);
+  if(!data||!data.ok||!data.counts)throw new Error(data&&data.error||'Máy chủ chưa hỗ trợ thống kê. Hãy triển khai Code.gs mới.');
+  if(selectedDate!==$('statsPicker').value){statsReload=true;return;}
+  dailyStats=data;statsLastAt=Date.now();showStats();$('statsState').textContent='Đã đồng bộ với Google Sheets';
+ }catch(e){dailyStats=null;showStats();$('statsAnnouncement').textContent='CHƯA LẤY ĐƯỢC SỐ LIỆU '+dc; $('statsState').textContent='Không tải được thống kê: '+String(e.message||e);}
+ finally{statsInFlight=false;$('statsRefresh').disabled=false;if(statsReload){statsReload=false;refreshStats();}}
+}
+$('statsRefresh').onclick=refreshStats;
+$('statsPicker').onchange=()=>{showStats();refreshStats();};
+showStats();
 function setServer(s,ok){$('server').textContent=s;$('server').style.color=ok?'#176b42':'#9b2020'}
 function jsonp(action,params={},timeoutMs=9000){
   return new Promise((resolve,reject)=>{
@@ -132,7 +170,7 @@ async function ping(){
     const result=await jsonp('ping',{},12000);
     if(!result||result.version!==EXPECTED_VERSION||result.ok!==true)
       throw new Error('Apps Script chưa triển khai đúng phiên bản V8.');
-    ready=true;setServer('✓ Máy chủ đã kết nối — '+result.version,true);
+    ready=true;setServer('✓ Máy chủ đã kết nối — '+result.version,true);refreshStats();
     if(!pending&&!busy)setStatus('Máy chủ đã sẵn sàng. Quét QR và nhấn CẬP NHẬT.','note');
   }catch(e){setServer('✕ Chưa kết nối API V8: '+(e.message||e),false);setStatus('Chưa thể xác nhận máy chủ. Không cập nhật mã mới cho tới khi kết nối thành công.','warn')}
   finally{$('ping').disabled=false}
@@ -271,6 +309,7 @@ function clearSelection(message,kind='note'){
   pending='';busy=false;request=null;
   $('confirm').style.display='none';$('manual').value='';draw();
   setStatus(message,kind==='warn-duplicate'?'warn':kind);
+  if(kind==='success')refreshStats();
   forceInlineVideo();
   // Camera vẫn chạy, không khởi động lại sau mỗi lần ghi.
   if(scanning&&liveVideo()){
@@ -362,5 +401,6 @@ $('abandon').onclick=()=>{
   clearSelection('Đã đóng giao dịch chưa xác minh sau khi kiểm tra Sheets.','warn');
 };
 ping();
+setInterval(()=>{if(!document.hidden&&ready&&Date.now()-statsLastAt>60000)refreshStats()},60000);
 </script>
 </body></html>
