@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Quét QR cấp nguyên liệu - V8.9.3</title>
+  <title>Quét QR cấp nguyên liệu - V8.9.4</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <style>
@@ -34,7 +34,7 @@
 </head>
 <body>
 <main>
-  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.9.3</h2>
+  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.9.4</h2>
   <div id="server" role="status">Đang kiểm tra kết nối máy chủ...</div>
   <section id="authPanel" class="tools" style="background:#e6f1ff;border:1px solid #a8c5e3">
     <strong>ĐĂNG NHẬP NHÂN VIÊN</strong>
@@ -116,7 +116,7 @@
 <script>
 'use strict';
 const WEB_APP_URL='https://script.google.com/macros/s/AKfycby9d-EKIJCLGmzOF-mcBFRVVrr5YGs6Ohhkt6mV9jdvxyG-m4suEKwyXPFJL7gdZhk/exec';
-const EXPECTED_VERSION='QR-V8.9.3-20261017';
+const EXPECTED_VERSION='QR-V8.9.4-20261017';
 const $=id=>document.getElementById(id);
 const validCode=x=>/^[A-Za-z0-9]{1,100}$/.test(x);
 const validLine=x=>/^DC0[1-9]$/.test(x);
@@ -512,7 +512,7 @@ window.addEventListener('message',event=>{
   if(cancelReq&&event.origin&&/^https:\/\/(?:script\.google\.com|[a-z0-9-]+\.googleusercontent\.com)$/.test(event.origin)){
     const d=event.data;if(d&&d.type==='CAP_NGUYEN_LIEU_RESULT'&&d.nonce===cancelReq.id){
       if(d.result&&d.result.ok&&d.result.cancelled)cancelComplete(cancelReq);
-      else cancelMessage('HỦY KHÔNG THÀNH CÔNG: '+(d.result&&d.result.error||'Không rõ nguyên nhân')+' — kiểm tra Sheets trước khi thao tác khác.');
+      else cancelMessage('Máy chủ trả về: '+(d.result&&d.result.error||'Chưa xác nhận')+'. Đang kiểm tra trạng thái trên Sheets; không gửi lại yêu cầu.');
     }
   }
   if(!request||!event.origin||!/^https:\/\/(?:script\.google\.com|[a-z0-9-]+\.googleusercontent\.com)$/.test(event.origin))return;
@@ -558,16 +558,34 @@ $('cancelLookup').onclick=async()=>{
  finally{cancelBusy=false;$('cancelLookup').disabled=false;}
 };
 async function cancelCheck(){
- if(!cancelReq)return;const req=cancelReq;
- try{const r=await jsonp('check',{mode:'cancel',id:req.id,ma:req.ma,token:authToken},15000);
-  if(r.ok&&r.cancelled&&r.id===req.id){cancelComplete(req);return;}
-  if(r.error){cancelMessage('CHƯA XÁC MINH HỦY: '+r.error);return;}
-  cancelMessage('CHƯA THẤY GIAO DỊCH HỦY TRÊN SHEETS. Kiểm tra trực tiếp Google Sheets trước khi đóng.');
- }catch(e){cancelMessage('Chưa xác minh được: '+String(e.message||e));}
+ if(!cancelReq)return;
+ const req=cancelReq;
+ try{
+  const r=await jsonp('check',{mode:'cancel',id:req.id,ma:req.ma,token:authToken},15000);
+  if(!cancelReq||cancelReq.id!==req.id)return;
+  if(r.ok&&r.cancelled&&r.id===req.id&&r.ma===req.ma){cancelComplete(req);return;}
+  if(r.error){cancelMessage('MÁY CHỦ BÁO LỖI: '+r.error+'\nKhông gửi lại yêu cầu khi chưa kiểm tra Sheets.');return;}
+  cancelMessage('Chưa xác nhận hủy mã '+req.ma+'. Đang tiếp tục kiểm tra kết quả trên Google Sheets...');
+ }catch(e){if(cancelReq&&cancelReq.id===req.id)cancelMessage('Chưa nhận được kết quả: '+String(e.message||e)+'. Đang tiếp tục xác minh...');}
+}
+async function cancelPoll(req){
+ const started=Date.now();
+ while(cancelReq&&cancelReq.id===req.id&&Date.now()-started<45000){
+  await new Promise(r=>setTimeout(r,2500));
+  if(!cancelReq||cancelReq.id!==req.id)return;
+  await cancelCheck();
+ }
+ if(cancelReq&&cancelReq.id===req.id){
+  cancelBusy=false;
+  $('cancelSubmit').disabled=true;
+  $('cancelRecheck').style.display='block';
+  cancelMessage('CHƯA XÁC MINH ĐƯỢC HỦY '+req.ma+'. Hãy kiểm tra cột F–J của '+req.dc+' trên Google Sheets, hoặc bấm KIỂM TRA LẠI. KHÔNG gửi lệnh hủy mới.');
+ }
 }
 function cancelComplete(req){
  if(!cancelReq||cancelReq.id!==req.id)return;
  cancelReq=null;cancelBusy=false;cancelReset();$('cancelCode').value='';$('cancelReason').value='';
+ $('cancelSubmit').disabled=false;
  confirmedCodes.delete(req.ma);lastHandledCode='';suppressLast=false;
  cancelMessage('ĐÃ HỦY THÀNH CÔNG: '+req.ma+' / '+req.dc+'. Có thể cấp lại mã nếu cần.');
  refreshStats();
@@ -580,13 +598,13 @@ $('cancelSubmit').onclick=async()=>{
  if(!nguoi){cancelMessage('Chưa đăng nhập.');return;}
  if(lydo.length<5||lydo.length>300){cancelMessage('Bắt buộc nhập lý do hủy từ 5 đến 300 ký tự.');return;}
  if(!window.confirm('Xác nhận HỦY CẤP mã '+cancelFound.ma+' tại '+cancelFound.dc+'?\nLý do: '+lydo))return;
- const id=crypto.randomUUID?crypto.randomUUID():'tx-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+ const id=crypto.randomUUID();
  const req={id,ma:cancelFound.ma,dc:cancelFound.dc};cancelReq=req;cancelBusy=true;
  $('cancelSubmit').disabled=true;$('cancelRecheck').style.display='block';
- cancelMessage('Đang gửi yêu cầu hủy, chờ xác minh...');
+ cancelMessage('Đang gửi yêu cầu hủy và xác minh trạng thái...');
  try{submitPost({action:'cancel',id,nonce:id,ma:req.ma,nguoi,lydo,token:authToken});}
- catch(e){cancelMessage('Chưa xác minh hủy: '+String(e.message||e));}
- setTimeout(async()=>{if(cancelReq&&cancelReq.id===id){await cancelCheck();cancelBusy=false;$('cancelSubmit').disabled=true;}},2000);
+ catch(e){cancelMessage('Không gửi được yêu cầu: '+String(e.message||e)+'. Hãy kiểm tra Sheets.');cancelBusy=false;return;}
+ cancelPoll(req);
 };
 $('cancelRecheck').onclick=cancelCheck;
 
