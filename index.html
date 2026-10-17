@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Quét QR cấp nguyên liệu - V8.9.1</title>
+  <title>Quét QR cấp nguyên liệu - V8.9.2</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <style>
@@ -34,7 +34,7 @@
 </head>
 <body>
 <main>
-  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.9.1</h2>
+  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.9.2</h2>
   <div id="server" role="status">Đang kiểm tra kết nối máy chủ...</div>
   <section id="authPanel" class="tools" style="background:#e6f1ff;border:1px solid #a8c5e3">
     <strong>ĐĂNG NHẬP NHÂN VIÊN</strong>
@@ -110,7 +110,7 @@
 <script>
 'use strict';
 const WEB_APP_URL='https://script.google.com/macros/s/AKfycby9d-EKIJCLGmzOF-mcBFRVVrr5YGs6Ohhkt6mV9jdvxyG-m4suEKwyXPFJL7gdZhk/exec';
-const EXPECTED_VERSION='QR-V8.9-20261017';
+const EXPECTED_VERSION='QR-V8.9.2-20261017';
 const $=id=>document.getElementById(id);
 const validCode=x=>/^[A-Za-z0-9]{1,100}$/.test(x);
 const validLine=x=>/^DC0[1-9]$/.test(x);
@@ -436,7 +436,7 @@ function authSend(action,fields){
  catch(e){authPending=null;$('authStatus').textContent='Không gửi được yêu cầu: '+e.message;return;}
  // Dự phòng cho Safari: đọc kết quả đã xử lý trên máy chủ bằng nonce ngẫu nhiên.
  (async()=>{
-  for(let attempt=0;attempt<14;attempt++){
+  for(let attempt=0;attempt<20;attempt++){
    if(!authPending||authPending.nonce!==nonce)return;
    await new Promise(r=>setTimeout(r,1300));
    if(!authPending||authPending.nonce!==nonce)return;
@@ -446,7 +446,14 @@ function authSend(action,fields){
     if(response&&!response.pending&&response.error){$('authStatus').textContent=response.error;authPending=null;return;}
    }catch(e){}
   }
-  if(authPending&&authPending.nonce===nonce){authPending=null;$('authStatus').textContent='Không xác minh được kết quả đăng nhập. Hãy kiểm tra kết nối và thử lại.';}
+  if(authPending&&authPending.nonce===nonce){
+   if(action==='changePin'&&authToken){
+     try{const r=await jsonp('session',{token:authToken},12000);
+       if(r&&r.ok&&!r.mustChange){authPending=null;authUser=r;authDisplay();$('oldPin').value='';$('newPin').value='';$('authStatus').textContent='Đổi PIN thành công (đã xác minh lại phiên).';return;}
+     }catch(e){}
+   }
+   authPending=null;$('authStatus').textContent='Chưa xác minh được yêu cầu. Không gửi lại ngay; kiểm tra trạng thái tài khoản trên Google Sheets.';
+  }
  })();
 }
 function finishAuth(nonce,r){
