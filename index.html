@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Quét QR cấp nguyên liệu - V8.3</title>
+  <title>Quét QR cấp nguyên liệu - V8.5</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <style>
@@ -34,7 +34,7 @@
 </head>
 <body>
 <main>
-  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.3</h2>
+  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.5</h2>
   <div id="server" role="status">Đang kiểm tra kết nối máy chủ...</div>
   <label>1. Chọn dây chuyền</label><div class="grid" id="lines"></div>
   <label for="person">2. Người xuất (nhập một lần)</label>
@@ -77,6 +77,8 @@ const validLine=x=>/^DC0[1-9]$/.test(x);
 let dc=localStorage.getItem('qr_dc')||'DC01';if(!validLine(dc))dc='DC01';
 let reader=null,scanning=false,cameraStarting=false,ready=false,pending='',busy=false;
 let request=null,lastHandledCode='',suppressLast=false,videoRecovering=false;
+const confirmedCodes=new Set();
+let lastDuplicateWarningCode="",lastDuplicateWarningAt=0;
 let smallMode=false,torchOn=false,zoomSupported=false;
 let fallbackTimer=null, fallbackBusy=false, fallbackCanvas=document.createElement("canvas"), fallbackCtx=fallbackCanvas.getContext("2d",{willReadFrequently:true});
 function forceInlineVideo(){
@@ -158,7 +160,7 @@ function startFallback(){
     const v=$("reader").querySelector("video");if(!v||v.readyState<2||!v.videoWidth)return;
     fallbackBusy=true;
     try{
-      const w=Math.min(v.videoWidth,1920),h=Math.round(w*v.videoHeight/v.videoWidth);
+      const w=Math.min(v.videoWidth,960),h=Math.round(w*v.videoHeight/v.videoWidth);
       fallbackCanvas.width=w;fallbackCanvas.height=h;
       fallbackCtx.drawImage(v,0,0,w,h);
       const regions=smallMode?[[0,0,w,h],[Math.round(w*.15),Math.round(h*.15),Math.round(w*.7),Math.round(h*.7)]]:[[0,0,w,h]];
@@ -174,7 +176,7 @@ function startFallback(){
       }
     }catch(e){/* Safari có thể tạm thời chưa cho đọc frame */}
     finally{fallbackBusy=false}
-  },smallMode?650:1100);
+  },smallMode?900:1300);
 }
 function stopFallback(){if(fallbackTimer){clearInterval(fallbackTimer);fallbackTimer=null}}
 function updateCameraControls(){
@@ -246,8 +248,16 @@ function choose(value){
   const ma=String(value||'').trim();
   if(!validCode(ma)){setStatus('Mã QR chỉ được gồm chữ và số (tối đa 100 ký tự).','warn');return}
   if(pending||busy||request)return;
-  if(suppressLast&&ma===lastHandledCode)return;
-  if(ma!==lastHandledCode)suppressLast=false;
+  if(confirmedCodes.has(ma)){
+    const now=Date.now();
+    if(lastDuplicateWarningCode!==ma||now-lastDuplicateWarningAt>2500){
+      lastDuplicateWarningCode=ma;lastDuplicateWarningAt=now;
+      setStatus('⚠ MÃ ĐÃ GHI NHẬN — '+ma+'\nVUI LÒNG QUÉT MÃ KHÁC. Không gửi thêm dữ liệu.','warn');
+      if($('scanDiagnostics'))$('scanDiagnostics').textContent='Mã '+ma+' đã được ghi nhận. Camera vẫn sẵn sàng đọc mã khác.';
+    }
+    return;
+  }
+  lastDuplicateWarningCode='';
   pending=ma;$('chosenDc').textContent=dc;$('chosenCode').textContent=ma;
   $('confirm').style.display='block';$('save').disabled=false;$('cancel').disabled=false;
   $('recheck').style.display='none';$('abandon').style.display='none';draw();
@@ -257,13 +267,19 @@ function choose(value){
 $('manualGo').onclick=()=>choose($('manual').value);
 function clearSelection(message,kind='note'){
   const previous=pending;
-  if(kind==='success'||kind==='warn-duplicate'){lastHandledCode=previous;suppressLast=true}
+  if(kind==='success'||kind==='warn-duplicate'){lastHandledCode=previous;suppressLast=true;confirmedCodes.add(previous)}
   pending='';busy=false;request=null;
   $('confirm').style.display='none';$('manual').value='';draw();
   setStatus(message,kind==='warn-duplicate'?'warn':kind);
   forceInlineVideo();
-  if(scanning&&liveVideo())$('reader').scrollIntoView({block:'center',behavior:'smooth'});
-  else if(scanning)ensureVideo();
+  // Camera vẫn chạy, không khởi động lại sau mỗi lần ghi.
+  if(scanning&&liveVideo()){
+    $('reader').scrollIntoView({block:'center',behavior:'smooth'});
+    $('scanDiagnostics').textContent='SẴN SÀNG QUÉT MÃ TIẾP THEO — camera đang hoạt động.';
+  }else if(scanning){
+    $('scanDiagnostics').textContent='Đang khôi phục camera...';
+    ensureVideo();
+  }
 }
 function submitPost(data){
   const form=document.createElement('form');form.method='POST';form.action=WEB_APP_URL;
