@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Quét QR cấp nguyên liệu - V8.9.2</title>
+  <title>Quét QR cấp nguyên liệu - V8.9.3</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <style>
@@ -34,7 +34,7 @@
 </head>
 <body>
 <main>
-  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.9.2</h2>
+  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.9.3</h2>
   <div id="server" role="status">Đang kiểm tra kết nối máy chủ...</div>
   <section id="authPanel" class="tools" style="background:#e6f1ff;border:1px solid #a8c5e3">
     <strong>ĐĂNG NHẬP NHÂN VIÊN</strong>
@@ -65,7 +65,13 @@
     <button type="button" id="statsRefresh" style="margin-top:9px;padding:9px 14px;border:0;border-radius:8px;background:#315a78;color:white;font-weight:bold">↻ LÀM MỚI THỐNG KÊ</button>
   </section>
   <input id="person" type="hidden">
-  <label>3. Quét mã QR</label>
+  <label>3. Chọn chế độ quét QR</label>
+  <div class="tools" style="display:flex;gap:8px;flex-wrap:wrap" role="group" aria-label="Chế độ quét">
+    <button type="button" class="btn" id="modeSupply" style="flex:1;min-width:140px">CẤP NGUYÊN LIỆU</button>
+    <button type="button" class="btn muted" id="modeCancel" style="flex:1;min-width:140px">QUÉT MÃ ĐỂ HỦY</button>
+  </div>
+  <div class="hint" id="scanModeHint" aria-live="polite">Chế độ cấp: quét mã và xác nhận cấp nguyên liệu.</div>
+  <label>4. Quét mã QR</label>
   <button class="btn" id="start" type="button">BẬT CAMERA QUÉT QR</button>
   <button class="btn muted" id="stop" type="button" disabled>DỪNG CAMERA</button>
   <div class="tools">
@@ -79,7 +85,7 @@
   <div class="small" id="scanDiagnostics" aria-live="polite">Bộ giải mã bổ sung sẽ hoạt động khi bật camera.</div>
   <section class="tools" id="cancelPanel" style="margin:14px 0">
     <strong>HỦY MÃ ĐÃ CẤP</strong>
-    <p class="hint">Mọi nhân viên có thể hủy mã đã cấp, bắt buộc nhập tên và lý do. Không xóa lịch sử.</p>
+    <p class="hint">Mọi nhân viên đã đăng nhập có thể hủy mã đã cấp. Chọn QUÉT MÃ ĐỂ HỦY ở phía trên để camera tự điền mã và tra cứu; bắt buộc nhập lý do. Không xóa lịch sử.</p>
     <label for="cancelCode">Mã nguyên liệu cần hủy</label>
     <input id="cancelCode" maxlength="100" placeholder="Nhập hoặc dán mã QR cần hủy" autocomplete="off">
     <button type="button" class="btn muted" id="cancelLookup">TRA CỨU MÃ CẦN HỦY</button>
@@ -110,7 +116,7 @@
 <script>
 'use strict';
 const WEB_APP_URL='https://script.google.com/macros/s/AKfycby9d-EKIJCLGmzOF-mcBFRVVrr5YGs6Ohhkt6mV9jdvxyG-m4suEKwyXPFJL7gdZhk/exec';
-const EXPECTED_VERSION='QR-V8.9.2-20261017';
+const EXPECTED_VERSION='QR-V8.9.3-20261017';
 const $=id=>document.getElementById(id);
 const validCode=x=>/^[A-Za-z0-9]{1,100}$/.test(x);
 const validLine=x=>/^DC0[1-9]$/.test(x);
@@ -119,6 +125,7 @@ let dailyStats=null,statsInFlight=false,statsLastAt=0,statsReload=false;
 const vnDate=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 $('statsPicker').value=vnDate();
 let reader=null,scanning=false,cameraStarting=false,ready=false,pending='',busy=false;
+let scanMode='supply',lastCancelScan='',lastCancelScanAt=0;
 let request=null,lastHandledCode='',suppressLast=false,videoRecovering=false;
 const confirmedCodes=new Set();
 const checkingCachedCodes=new Set();
@@ -224,7 +231,7 @@ async function tryFocus(){
 function startFallback(){
   stopFallback();
   fallbackTimer=setInterval(()=>{
-    if(fallbackBusy||!scanning||pending||busy||request||document.hidden||typeof jsQR!=="function"||!fallbackCtx)return;
+    if(fallbackBusy||!scanning||pending||busy||request||cancelBusy||cancelReq||document.hidden||typeof jsQR!=="function"||!fallbackCtx)return;
     const v=$("reader").querySelector("video");if(!v||v.readyState<2||!v.videoWidth)return;
     fallbackBusy=true;
     try{
@@ -240,7 +247,7 @@ function startFallback(){
           for(let i=0;i<d.length;i+=4){const z=Math.round(.299*d[i]+.587*d[i+1]+.114*d[i+2]);lo=Math.min(lo,z);hi=Math.max(hi,z)}
           if(hi-lo>18){for(let i=0;i<d.length;i+=4){const z=Math.max(0,Math.min(255,(.299*d[i]+.587*d[i+1]+.114*d[i+2]-lo)*255/(hi-lo)));d[i]=d[i+1]=d[i+2]=z}result=jsQR(d,rw,rh,{inversionAttempts:"attemptBoth"})}
         }
-        if(result?.data){choose(result.data);break}
+        if(result?.data){routeScannedCode(result.data);break}
       }
     }catch(e){/* Safari có thể tạm thời chưa cho đọc frame */}
     finally{fallbackBusy=false}
@@ -290,10 +297,10 @@ async function startCamera(){
   try{
     reader=new Html5Qrcode('reader',{verbose:false,formatsToSupport:[Html5QrcodeSupportedFormats.QR_CODE],useBarCodeDetectorIfSupported:true});
     await reader.start({facingMode:'environment'},{fps:15,qrbox:undefined,videoConstraints:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}},code=>{
-      if(!pending&&!busy&&!request)choose(code);
+      if(!pending&&!busy&&!request&&!cancelBusy&&!cancelReq)routeScannedCode(code);
     },()=>{});
     forceInlineVideo();scanning=true;$('stop').disabled=false;updateCameraControls();await tryFocus();startFallback();$('scanDiagnostics').textContent=typeof jsQR==='function'?'Đã bật 2 bộ giải mã QR (chính + dự phòng).':'Đang dùng bộ giải mã chính; thư viện dự phòng chưa tải được.';if(smallMode){const caps=getVideoTrack()?.getCapabilities?.()||{};if(caps.zoom){const z=Math.min(caps.zoom.max,Math.max(caps.zoom.min,2));try{await applyTrackSettings({zoom:z});$('zoom').value=String(z);$('zoomText').textContent=z.toFixed(1)+'×'}catch(e){}}}
-    if(!pending&&!busy)setStatus('Camera đang hoạt động. Hướng vào QR cần cấp.');
+    if(!pending&&!busy)setStatus(scanMode==='cancel'?'Camera đang hoạt động. Hướng vào QR cần tra cứu hủy.':'Camera đang hoạt động. Hướng vào QR cần cấp.');
   }catch(e){scanning=false;reader=null;$('start').disabled=false;$('stop').disabled=true;setStatus('Không mở được camera: '+(e.message||e),'warn')}
   finally{cameraStarting=false}
 }
@@ -312,6 +319,31 @@ async function ensureVideo(){
 }
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(()=>{forceInlineVideo();ensureVideo()},600)});
 setInterval(()=>{if(!document.hidden){forceInlineVideo();ensureVideo()}},4000);
+function setScanMode(mode){
+ if(mode!=='supply'&&mode!=='cancel')return;
+ if(pending||busy||request||cancelReq||cancelBusy){setStatus('Đang có giao dịch cần hoàn tất trước khi đổi chế độ.','warn');return;}
+ scanMode=mode;
+ $('modeSupply').className='btn '+(mode==='supply'?'':'muted');
+ $('modeCancel').className='btn '+(mode==='cancel'?'':'muted');
+ $('scanModeHint').textContent=mode==='cancel'?'CHẾ ĐỘ HỦY: Camera chỉ lấy mã để tra cứu, KHÔNG cấp và KHÔNG tự động hủy.':'CHẾ ĐỘ CẤP: Camera quét mã để xác nhận cấp nguyên liệu.';
+ setStatus(mode==='cancel'?'Đang ở chế độ tra cứu hủy. Quét QR, nhập lý do rồi xác nhận hủy.':'Đang ở chế độ cấp nguyên liệu.');
+ if(mode==='cancel')$('cancelPanel').scrollIntoView({block:'nearest',behavior:'smooth'});
+}
+$('modeSupply').onclick=()=>setScanMode('supply');
+$('modeCancel').onclick=()=>setScanMode('cancel');
+function routeScannedCode(value){
+ if(scanMode==='supply'){choose(value);return;}
+ const ma=String(value||'').trim();
+ if(!validCode(ma)){cancelMessage('Mã QR không hợp lệ (chỉ chữ và số, tối đa 100 ký tự).');return;}
+ if(cancelBusy||cancelReq||pending||busy||request)return;
+ if(ma===lastCancelScan&&Date.now()-lastCancelScanAt<3500)return;
+ lastCancelScan=ma;lastCancelScanAt=Date.now();
+ $('cancelCode').value=ma;
+ cancelReset();
+ cancelMessage('Đã quét mã '+ma+'. Đang tra cứu trên Google Sheets...');
+ $('cancelLookup').click();
+ $('cancelPanel').scrollIntoView({block:'center',behavior:'smooth'});
+}
 function choose(value){
   const ma=String(value||'').trim();
   if(!validCode(ma)){setStatus('Mã QR chỉ được gồm chữ và số (tối đa 100 ký tự).','warn');return}
@@ -342,7 +374,7 @@ function choose(value){
   setStatus('Đã đọc mã '+ma+'. Kiểm tra dây chuyền và nhấn CẬP NHẬT.');
   $('confirm').scrollIntoView({block:'center',behavior:'smooth'});
 }
-$('manualGo').onclick=()=>choose($('manual').value);
+$('manualGo').onclick=()=>routeScannedCode($('manual').value);
 function clearSelection(message,kind='note'){
   const previous=pending;
   if(kind==='success'||kind==='warn-duplicate'){lastHandledCode=previous;suppressLast=true;confirmedCodes.add(previous)}
