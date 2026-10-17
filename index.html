@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Quét QR cấp nguyên liệu - V8</title>
+  <title>Quét QR cấp nguyên liệu - V8.2</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <style>
     *{box-sizing:border-box}body{margin:0;background:#edf3f7;color:#17365d;font:16px Arial,sans-serif}
@@ -17,6 +17,11 @@
     .btn{display:block;width:100%;padding:14px;margin:9px 0;border:0;border-radius:9px;background:#176b42;color:white;font:bold 17px Arial}
     .btn.muted{background:#667b8b}.btn:disabled{opacity:.48}
     #reader{margin:12px 0;border-radius:10px;overflow:hidden}
+    .tools{background:#eef4f8;padding:12px;border-radius:10px;margin:10px 0}
+    .tools button{padding:11px;border:0;border-radius:8px;background:#315a78;color:#fff;font-weight:bold;margin:4px}
+    .tools button:disabled{opacity:.45}
+    .tools input[type=range]{width:100%;accent-color:#176b42}
+    .tools .hint{font-size:13px;color:#49677a;line-height:1.5}
     #confirm{display:none;background:#edf3f9;border-radius:11px;padding:15px;margin:16px 0;line-height:1.65}
     #confirm strong{overflow-wrap:anywhere}
     #status{white-space:pre-wrap;line-height:1.55;border-radius:9px;padding:12px;margin:15px 0;font-size:15px}
@@ -28,7 +33,7 @@
 </head>
 <body>
 <main>
-  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.1</h2>
+  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.2</h2>
   <div id="server" role="status">Đang kiểm tra kết nối máy chủ...</div>
   <label>1. Chọn dây chuyền</label><div class="grid" id="lines"></div>
   <label for="person">2. Người xuất (nhập một lần)</label>
@@ -36,6 +41,13 @@
   <label>3. Quét mã QR</label>
   <button class="btn" id="start" type="button">BẬT CAMERA QUÉT QR</button>
   <button class="btn muted" id="stop" type="button" disabled>DỪNG CAMERA</button>
+  <div class="tools">
+    <strong>Hỗ trợ mã QR nhỏ 10–15 mm</strong>
+    <div><button id="smallMode" type="button">CHẾ ĐỘ QR NHỎ: TẮT</button><button id="torch" type="button" disabled>ĐÈN PIN: TẮT</button></div>
+    <label for="zoom" style="margin:8px 0">Phóng đại camera: <span id="zoomText">1×</span></label>
+    <input id="zoom" type="range" min="1" max="3" step="0.1" value="1" disabled>
+    <div class="hint" id="cameraInfo">Zoom và đèn pin chỉ hoạt động trên điện thoại/trình duyệt hỗ trợ. Nếu túi zipper phản sáng, vuốt phẳng túi và nghiêng điện thoại 15–30°.</div>
+  </div>
   <div id="reader"></div>
   <div id="confirm">
     <div>Dây chuyền: <strong id="chosenDc"></strong></div>
@@ -63,6 +75,7 @@ const validLine=x=>/^DC0[1-9]$/.test(x);
 let dc=localStorage.getItem('qr_dc')||'DC01';if(!validLine(dc))dc='DC01';
 let reader=null,scanning=false,cameraStarting=false,ready=false,pending='',busy=false;
 let request=null,lastHandledCode='',suppressLast=false,videoRecovering=false;
+let smallMode=false,torchOn=false,zoomSupported=false;
 function forceInlineVideo(){
  const v=$('reader').querySelector('video');if(!v)return;
  v.setAttribute('playsinline','');v.setAttribute('webkit-playsinline','');v.setAttribute('x5-playsinline','');
@@ -121,23 +134,66 @@ async function ping(){
 }
 $('ping').onclick=ping;
 function liveVideo(){const video=$('reader').querySelector('video');return !!(video&&video.srcObject&&video.srcObject.getVideoTracks().some(t=>t.readyState==='live')&&!video.paused)}
+function getVideoTrack(){
+  const v=$('reader').querySelector('video');
+  return v&&v.srcObject&&v.srcObject.getVideoTracks()[0]||null;
+}
+async function applyTrackSettings(settings){
+  const track=getVideoTrack();if(!track)throw new Error('Camera chưa sẵn sàng');
+  await track.applyConstraints({advanced:[settings]});
+}
+function updateCameraControls(){
+  const track=getVideoTrack();const caps=track&&typeof track.getCapabilities==='function'?track.getCapabilities():{};
+  zoomSupported=!!(caps.zoom&&Number.isFinite(caps.zoom.min)&&Number.isFinite(caps.zoom.max)&&caps.zoom.max>caps.zoom.min);
+  $('zoom').disabled=!zoomSupported;
+  if(zoomSupported){
+    $('zoom').min=String(caps.zoom.min);$('zoom').max=String(caps.zoom.max);
+    $('zoom').step=String(caps.zoom.step||0.1);
+    const current=track.getSettings().zoom||caps.zoom.min;
+    $('zoom').value=String(Math.min(caps.zoom.max,Math.max(caps.zoom.min,current)));
+    $('zoomText').textContent=Number($('zoom').value).toFixed(1)+'×';
+  }else{$('zoomText').textContent='Không hỗ trợ';}
+  $('torch').disabled=!caps.torch;torchOn=false;$('torch').textContent='ĐÈN PIN: TẮT';
+  $('cameraInfo').textContent='Camera '+(track&&track.getSettings().width||'?')+'×'+(track&&track.getSettings().height||'?')+'. '+(zoomSupported?'Có zoom phần cứng. ':'Không hỗ trợ điều chỉnh zoom qua web. ')+(caps.torch?'Có đèn pin.':'Không hỗ trợ đèn pin.');
+}
+$('zoom').addEventListener('input',async()=>{
+  if(!zoomSupported)return;
+  const v=Number($('zoom').value);$('zoomText').textContent=v.toFixed(1)+'×';
+  try{await applyTrackSettings({zoom:v})}catch(e){$('cameraInfo').textContent='Không thể điều chỉnh zoom: '+e.message}
+});
+$('torch').onclick=async()=>{
+  try{await applyTrackSettings({torch:!torchOn});torchOn=!torchOn;$('torch').textContent='ĐÈN PIN: '+(torchOn?'BẬT':'TẮT')}
+  catch(e){$('cameraInfo').textContent='Không bật được đèn pin: '+e.message}
+};
+$('smallMode').onclick=async()=>{
+  smallMode=!smallMode;$('smallMode').textContent='CHẾ ĐỘ QR NHỎ: '+(smallMode?'BẬT':'TẮT');
+  if(!scanning)return;
+  const track=getVideoTrack();const caps=track&&track.getCapabilities?track.getCapabilities():{};
+  if(smallMode&&caps.zoom){
+    const target=Math.min(caps.zoom.max,Math.max(caps.zoom.min,2));
+    try{await applyTrackSettings({zoom:target});$('zoom').value=String(target);$('zoomText').textContent=target.toFixed(1)+'×'}catch(e){}
+  }else if(!smallMode&&caps.zoom){
+    try{await applyTrackSettings({zoom:caps.zoom.min});$('zoom').value=String(caps.zoom.min);$('zoomText').textContent=Number(caps.zoom.min).toFixed(1)+'×'}catch(e){}
+  }
+  setStatus(smallMode?'Chế độ QR nhỏ: giữ máy ổn định, đưa QR vào giữa khung và tránh phản sáng.':'Đã chuyển sang chế độ thường.');
+};
 async function startCamera(){
   if(scanning||cameraStarting)return;
   if(typeof Html5Qrcode==='undefined'){setStatus('Không tải được thư viện camera. Kiểm tra kết nối mạng.','warn');return}
   cameraStarting=true;$('start').disabled=true;
   try{
     reader=new Html5Qrcode('reader',{verbose:false});
-    await reader.start({facingMode:'environment'},{fps:10,qrbox:{width:240,height:240}},code=>{
+    await reader.start({facingMode:'environment'},{fps:12,aspectRatio:1.333333,videoConstraints:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}},code=>{
       if(!pending&&!busy&&!request)choose(code);
     },()=>{});
-    forceInlineVideo();scanning=true;$('stop').disabled=false;
+    forceInlineVideo();scanning=true;$('stop').disabled=false;updateCameraControls();if(smallMode){const caps=getVideoTrack()?.getCapabilities?.()||{};if(caps.zoom){const z=Math.min(caps.zoom.max,Math.max(caps.zoom.min,2));try{await applyTrackSettings({zoom:z});$('zoom').value=String(z);$('zoomText').textContent=z.toFixed(1)+'×'}catch(e){}}}
     if(!pending&&!busy)setStatus('Camera đang hoạt động. Hướng vào QR cần cấp.');
   }catch(e){scanning=false;reader=null;$('start').disabled=false;$('stop').disabled=true;setStatus('Không mở được camera: '+(e.message||e),'warn')}
   finally{cameraStarting=false}
 }
 async function stopCamera(){
   if(reader){try{if(scanning)await reader.stop()}catch(e){};try{reader.clear()}catch(e){}}
-  reader=null;scanning=false;cameraStarting=false;$('start').disabled=false;$('stop').disabled=true;
+  reader=null;scanning=false;cameraStarting=false;$('start').disabled=false;$('stop').disabled=true;$('zoom').disabled=true;$('torch').disabled=true;
 }
 $('start').onclick=startCamera;
 $('stop').onclick=()=>stopCamera().then(()=>setStatus('Đã dừng camera.'));
