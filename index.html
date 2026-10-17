@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Quét QR cấp nguyên liệu - V8.9</title>
+  <title>Quét QR cấp nguyên liệu - V8.9.1</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <style>
@@ -34,7 +34,7 @@
 </head>
 <body>
 <main>
-  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.9</h2>
+  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.9.1</h2>
   <div id="server" role="status">Đang kiểm tra kết nối máy chủ...</div>
   <section id="authPanel" class="tools" style="background:#e6f1ff;border:1px solid #a8c5e3">
     <strong>ĐĂNG NHẬP NHÂN VIÊN</strong>
@@ -430,10 +430,33 @@ function authDisplay(){
 }
 function authSend(action,fields){
  if(authPending)return;
- const nonce=crypto.randomUUID?crypto.randomUUID():'auth-'+Date.now();
+ const nonce=crypto.randomUUID();
  authPending={nonce,action};$('authStatus').textContent='Đang xác thực...';
- submitPost({action,nonce,token:authToken,...fields});
- setTimeout(()=>{if(authPending&&authPending.nonce===nonce){authPending=null;$('authStatus').textContent='Không nhận được phản hồi. Kiểm tra mạng và thử lại.';}},16000);
+ try{submitPost({action,nonce,token:authToken,...fields});}
+ catch(e){authPending=null;$('authStatus').textContent='Không gửi được yêu cầu: '+e.message;return;}
+ // Dự phòng cho Safari: đọc kết quả đã xử lý trên máy chủ bằng nonce ngẫu nhiên.
+ (async()=>{
+  for(let attempt=0;attempt<14;attempt++){
+   if(!authPending||authPending.nonce!==nonce)return;
+   await new Promise(r=>setTimeout(r,1300));
+   if(!authPending||authPending.nonce!==nonce)return;
+   try{
+    const response=await jsonp('authResult',{nonce},8000);
+    if(response&&response.ok&&response.result){finishAuth(nonce,response.result);return;}
+    if(response&&!response.pending&&response.error){$('authStatus').textContent=response.error;authPending=null;return;}
+   }catch(e){}
+  }
+  if(authPending&&authPending.nonce===nonce){authPending=null;$('authStatus').textContent='Không xác minh được kết quả đăng nhập. Hãy kiểm tra kết nối và thử lại.';}
+ })();
+}
+function finishAuth(nonce,r){
+ if(!authPending||authPending.nonce!==nonce)return;
+ const a=authPending.action;authPending=null;
+ if(!r||!r.ok){$('authStatus').textContent='Lỗi: '+(r?.error||'Xác thực thất bại');return;}
+ if(a==='login'){authToken=r.token;localStorage.setItem('qr_auth_token',authToken);authUser=r;$('pin').value='';}
+ else if(a==='changePin'){authUser={...authUser,mustChange:false};$('oldPin').value='';$('newPin').value='';}
+ else if(a==='logout'){authToken='';authUser=null;localStorage.removeItem('qr_auth_token');}
+ authDisplay();
 }
 $('loginBtn').onclick=()=>authSend('login',{employee:$('employee').value.trim(),pin:$('pin').value});
 $('changePinBtn').onclick=()=>authSend('changePin',{oldPin:$('oldPin').value,newPin:$('newPin').value});
@@ -442,13 +465,8 @@ $('logoutBtn').onclick=()=>{authSend('logout',{});};
 async function authRestore(){if(!authToken){authDisplay();return;}try{const r=await jsonp('session',{token:authToken},12000);if(!r.ok)throw Error(r.error);authUser=r;authDisplay();}catch(e){authToken='';authUser=null;localStorage.removeItem('qr_auth_token');authDisplay();}}
 window.addEventListener('message',event=>{
  if(!event.origin||!/^https:\/\/(?:script\.google\.com|[a-z0-9-]+\.googleusercontent\.com)$/.test(event.origin))return;
- const d=event.data;if(!authPending||!d||d.type!=='CAP_NGUYEN_LIEU_RESULT'||d.nonce!==authPending.nonce)return;
- const a=authPending.action;authPending=null;const r=d.result||{};
- if(!r.ok){$('authStatus').textContent='Lỗi: '+(r.error||'Xác thực thất bại');return;}
- if(a==='login'){authToken=r.token;localStorage.setItem('qr_auth_token',authToken);authUser=r;$('pin').value='';}
- else if(a==='changePin'){authUser={...authUser,mustChange:false};$('oldPin').value='';$('newPin').value='';}
- else if(a==='logout'){authToken='';authUser=null;localStorage.removeItem('qr_auth_token');}
- authDisplay();
+ const d=event.data;
+ if(d&&d.type==='CAP_NGUYEN_LIEU_RESULT'&&authPending&&d.nonce===authPending.nonce)finishAuth(d.nonce,d.result);
 });
 authRestore();
 window.addEventListener('message',event=>{
