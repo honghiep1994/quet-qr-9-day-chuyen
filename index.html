@@ -56,8 +56,8 @@
   <section id="authPanel" class="tools" style="background:#e6f1ff;border:1px solid #a8c5e3">
     <strong>ĐĂNG NHẬP NHÂN VIÊN</strong>
     <div id="authLogin">
-      <label for="employee">Mã nhân viên</label><input id="employee" autocomplete="username" placeholder="NV001">
-      <label for="pin">Mã PIN cá nhân (6–12 số)</label><input id="pin" type="password" inputmode="numeric" autocomplete="current-password">
+      <label for="employee">Mã nhân viên</label><input id="employee" autocomplete="off" placeholder="NV001">
+      <label for="pin">Mã PIN cá nhân (6–12 số)</label><input id="pin" type="password" inputmode="numeric" autocomplete="off">
       <button class="btn" id="loginBtn" type="button">ĐĂNG NHẬP</button>
     </div>
     <div id="authChange" style="display:none">
@@ -473,7 +473,10 @@ $('save').onclick=async()=>{
   await new Promise(r=>setTimeout(r,1800));
   poll(req,36000);
 };
-let authToken=localStorage.getItem('qr_auth_token')||'',authUser=null,authPending=null;
+// Không khôi phục đăng nhập từ bộ nhớ máy. Token chỉ tồn tại trong tab hiện tại.
+localStorage.removeItem('qr_auth_token');
+sessionStorage.removeItem('qr_auth_token');
+let authToken='',authUser=null,authPending=null;
 function authReady(){return !!(authToken&&authUser&&!authUser.mustChange);}
 function authDisplay(){
  $('authLogin').style.display=authUser?'none':'block';
@@ -529,23 +532,25 @@ function finishAuth(nonce,r){
  if(!authPending||authPending.nonce!==nonce)return;
  const a=authPending.action;authPending=null;
  if(!r||!r.ok){$('authStatus').textContent='Lỗi: '+(r?.error||'Xác thực thất bại');return;}
- if(a==='login'){authToken=r.token;localStorage.setItem('qr_auth_token',authToken);authUser=r;$('pin').value='';}
+ if(a==='login'){
+  if(!r.token){$('authStatus').textContent='Máy chủ không trả mã phiên đăng nhập. Vui lòng kiểm tra Code.gs.';return;}
+  authToken=r.token;authUser=r;$('pin').value='';
+ }
  else if(a==='changePin'){authUser={...authUser,mustChange:false};$('oldPin').value='';$('newPin').value='';}
- else if(a==='logout'){authToken='';authUser=null;localStorage.removeItem('qr_auth_token');}
+ else if(a==='logout'){authToken='';authUser=null;localStorage.removeItem('qr_auth_token');sessionStorage.removeItem('qr_auth_token');stopCamera();}
  authDisplay();
 }
 $('loginBtn').onclick=()=>authSend('login',{employee:$('employee').value.trim(),pin:$('pin').value});
 $('changePinBtn').onclick=()=>authSend('changePin',{oldPin:$('oldPin').value,newPin:$('newPin').value});
 $('showPinChange').onclick=()=>{if(authUser){authUser.mustChange=true;authDisplay();window.scrollTo(0,0);}};
 $('logoutBtn').onclick=()=>{authSend('logout',{});};
-async function authRestore(){if(!authToken){authDisplay();return;}try{const r=await jsonp('session',{token:authToken},12000);if(!r.ok)throw Error(r.error);authUser=r;authDisplay();if(authReady())refreshStats();}catch(e){authToken='';authUser=null;localStorage.removeItem('qr_auth_token');authDisplay();}}
+// Tắt khôi phục phiên: mở lại hoặc tải lại trang đều yêu cầu đăng nhập.
 window.addEventListener('message',event=>{
  if(!event.origin||!/^https:\/\/(?:script\.google\.com|[a-z0-9-]+\.googleusercontent\.com)$/.test(event.origin))return;
  const d=event.data;
  if(d&&d.type==='CAP_NGUYEN_LIEU_RESULT'&&authPending&&d.nonce===authPending.nonce)finishAuth(d.nonce,d.result);
 });
 authDisplay();
-authRestore();
 window.addEventListener('message',event=>{
   if(cancelReq&&event.origin&&/^https:\/\/(?:script\.google\.com|[a-z0-9-]+\.googleusercontent\.com)$/.test(event.origin)){
     const d=event.data;if(d&&d.type==='CAP_NGUYEN_LIEU_RESULT'&&d.nonce===cancelReq.id){
