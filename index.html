@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Quét QR cấp nguyên liệu - V8.9.4</title>
+  <title>Hoa Sen Hà Nam | QR cấp nguyên liệu</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <style>
@@ -30,11 +30,28 @@
     .warn{background:#ffe6e6;color:#9b2020}.wait{background:#fff4df;color:#795216}
     .small{font-size:13px;color:#607486}#postFrame{display:none}
     #server{font-size:13px;margin:12px 0;padding:9px;border-radius:8px;background:#edf3f7;color:#4a6476}
+    #loginView{min-height:calc(100dvh - 32px);display:flex;flex-direction:column;justify-content:center;gap:14px}
+    #loginView .loginBrand{text-align:center;padding:16px 6px}
+    #loginView .loginBrand .mark{display:inline-flex;width:60px;height:60px;align-items:center;justify-content:center;border-radius:14px;background:#8d4050;color:white;font-weight:bold;font-size:26px;margin-bottom:12px}
+    #loginView .loginBrand h1{font-size:23px;margin:5px 0;color:#17365d}
+    #loginView .loginBrand p{font-size:14px;color:#587085;margin:8px 0}
+    #authPanel{background:#fff!important;border:1px solid #d4dfe8!important;box-shadow:0 5px 25px #17365d12;padding:20px!important}
+    #authPanel>strong{display:block;text-align:center;margin:3px 0 12px;font-size:17px}
+    #appView{display:none}
+    #appView .appTop{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0 12px}
+    #appView .appTop h2{font-size:19px;text-align:left;margin:0}
+    #appView #authActive{display:block!important;margin:0 0 12px;background:#eef4f8;padding:12px;border-radius:10px}
+    #appView #authActive .btn{display:inline-block;width:auto;font-size:13px;padding:10px 12px;margin:8px 5px 0 0}
+    #appView #authWho{font-size:14px;display:block}
+    #loginView #server{margin:0;text-align:center}
+    #loginView #authStatus{margin-top:12px;line-height:1.5}
+    @media(min-width:600px){#loginView{max-width:430px;margin:auto}}
   </style>
 </head>
 <body>
 <main>
-  <h2>QUÉT QR CẤP NGUYÊN LIỆU · V8.9.4</h2>
+  <section id="loginView" aria-label="Đăng nhập hệ thống">
+    <div class="loginBrand"><div class="mark">HS</div><div style="font-size:11px;letter-spacing:2px">HOA SEN HÀ NAM</div><h1>Quét QR cấp nguyên liệu</h1><p>Đăng nhập bằng tài khoản nhân viên được cấp</p></div>
   <div id="server" role="status">Đang kiểm tra kết nối máy chủ...</div>
   <section id="authPanel" class="tools" style="background:#e6f1ff;border:1px solid #a8c5e3">
     <strong>ĐĂNG NHẬP NHÂN VIÊN</strong>
@@ -49,9 +66,12 @@
       <label for="newPin">PIN mới (6–12 số)</label><input id="newPin" type="password" inputmode="numeric">
       <button class="btn" id="changePinBtn" type="button">ĐỔI PIN VÀ TIẾP TỤC</button>
     </div>
-    <div id="authActive" style="display:none"><b id="authWho"></b><button type="button" class="btn muted" id="logoutBtn">ĐĂNG XUẤT</button><button type="button" class="btn muted" id="showPinChange">ĐỔI PIN</button></div>
     <div id="authStatus" role="status" class="hint">Đăng nhập để cấp hoặc hủy nguyên liệu. Thống kê vẫn có thể xem.</div>
   </section>
+  </section>
+  <section id="appView" aria-label="Giao diện quét QR" hidden>
+    <div class="appTop"><h2>QUÉT QR CẤP NGUYÊN LIỆU</h2><span class="small">V8.9.4</span></div>
+    <div id="authActive" style="display:none"><b id="authWho"></b><button type="button" class="btn muted" id="logoutBtn">ĐĂNG XUẤT</button><button type="button" class="btn muted" id="showPinChange">ĐỔI PIN</button></div>
   <label>1. Chọn dây chuyền</label><div class="grid" id="lines"></div>
   <section id="statsPanel" style="background:#e8f5ee;border:1px solid #c1e3ce;border-radius:12px;padding:14px;margin:12px 0" aria-live="polite">
     <div style="font-weight:bold">THỐNG KÊ CẤP NGUYÊN LIỆU TRONG NGÀY</div>
@@ -111,6 +131,7 @@
   <p id="status" class="note" role="status" aria-live="polite">Bật camera một lần để quét liên tục.</p>
   <button class="btn muted" id="ping" type="button">KIỂM TRA KẾT NỐI MÁY CHỦ</button>
   <p class="small">Chỉ cấp nguyên liệu khi nhận thông báo ĐÃ GHI NHẬN. Nếu chưa xác minh được, phải kiểm tra Google Sheets trước khi tiếp tục.</p>
+  </section>
   <iframe id="postFrame" name="qrPostFrame" title="Kết nối máy chủ"></iframe>
 </main>
 <script>
@@ -207,7 +228,7 @@ async function ping(){
     const result=await jsonp('ping',{},12000);
     if(!result||result.version!==EXPECTED_VERSION||result.ok!==true)
       throw new Error('Apps Script chưa triển khai đúng phiên bản V8.');
-    ready=true;setServer('✓ Máy chủ đã kết nối — '+result.version,true);refreshStats();
+    ready=true;setServer('✓ Máy chủ đã kết nối — '+result.version,true);if(authReady())refreshStats();
     if(!pending&&!busy)setStatus('Máy chủ đã sẵn sàng. Quét QR và nhấn CẬP NHẬT.','note');
   }catch(e){setServer('✕ Chưa kết nối API V8: '+(e.message||e),false);setStatus('Chưa thể xác nhận máy chủ. Không cập nhật mã mới cho tới khi kết nối thành công.','warn')}
   finally{$('ping').disabled=false}
@@ -291,6 +312,7 @@ $('smallMode').onclick=async()=>{
   setStatus(smallMode?'Chế độ QR nhỏ: giữ máy ổn định, đưa QR vào giữa khung và tránh phản sáng.':'Đã chuyển sang chế độ thường.');
 };
 async function startCamera(){
+  if(!authReady()){setStatus('Vui lòng đăng nhập trước khi quét QR.','warn');return;}
   if(scanning||cameraStarting)return;
   if(typeof Html5Qrcode==='undefined'){setStatus('Không tải được thư viện camera. Kiểm tra kết nối mạng.','warn');return}
   cameraStarting=true;$('start').disabled=true;
@@ -332,6 +354,7 @@ function setScanMode(mode){
 $('modeSupply').onclick=()=>setScanMode('supply');
 $('modeCancel').onclick=()=>setScanMode('cancel');
 function routeScannedCode(value){
+  if(!authReady())return;
  if(scanMode==='supply'){choose(value);return;}
  const ma=String(value||'').trim();
  if(!validCode(ma)){cancelMessage('Mã QR không hợp lệ (chỉ chữ và số, tối đa 100 ký tự).');return;}
@@ -499,14 +522,15 @@ function finishAuth(nonce,r){
 }
 $('loginBtn').onclick=()=>authSend('login',{employee:$('employee').value.trim(),pin:$('pin').value});
 $('changePinBtn').onclick=()=>authSend('changePin',{oldPin:$('oldPin').value,newPin:$('newPin').value});
-$('showPinChange').onclick=()=>{if(authUser){authUser.mustChange=true;authDisplay();}};
+$('showPinChange').onclick=()=>{if(authUser){authUser.mustChange=true;authDisplay();window.scrollTo(0,0);}};
 $('logoutBtn').onclick=()=>{authSend('logout',{});};
-async function authRestore(){if(!authToken){authDisplay();return;}try{const r=await jsonp('session',{token:authToken},12000);if(!r.ok)throw Error(r.error);authUser=r;authDisplay();}catch(e){authToken='';authUser=null;localStorage.removeItem('qr_auth_token');authDisplay();}}
+async function authRestore(){if(!authToken){authDisplay();return;}try{const r=await jsonp('session',{token:authToken},12000);if(!r.ok)throw Error(r.error);authUser=r;authDisplay();if(authReady())refreshStats();}catch(e){authToken='';authUser=null;localStorage.removeItem('qr_auth_token');authDisplay();}}
 window.addEventListener('message',event=>{
  if(!event.origin||!/^https:\/\/(?:script\.google\.com|[a-z0-9-]+\.googleusercontent\.com)$/.test(event.origin))return;
  const d=event.data;
  if(d&&d.type==='CAP_NGUYEN_LIEU_RESULT'&&authPending&&d.nonce===authPending.nonce)finishAuth(d.nonce,d.result);
 });
+authDisplay();
 authRestore();
 window.addEventListener('message',event=>{
   if(cancelReq&&event.origin&&/^https:\/\/(?:script\.google\.com|[a-z0-9-]+\.googleusercontent\.com)$/.test(event.origin)){
@@ -544,6 +568,7 @@ const cancelDetail=$('cancelDetail');
 function cancelMessage(msg){cancelDetail.textContent=msg;}
 function cancelReset(){cancelFound=null;$('cancelFields').style.display='none';$('cancelRecheck').style.display='none';}
 $('cancelLookup').onclick=async()=>{
+  if(!authReady()){cancelMessage('Vui lòng đăng nhập trước khi tra cứu.');return;}
  if(cancelBusy||cancelReq){cancelMessage('Có giao dịch hủy chưa xác minh. Hãy kiểm tra trước.');return;}
  cancelReset();const ma=$('cancelCode').value.trim();
  if(!validCode(ma)){cancelMessage('Mã chỉ gồm chữ và số, tối đa 100 ký tự.');return;}
@@ -609,6 +634,6 @@ $('cancelSubmit').onclick=async()=>{
 $('cancelRecheck').onclick=cancelCheck;
 
 ping();
-setInterval(()=>{if(!document.hidden&&ready&&Date.now()-statsLastAt>60000)refreshStats()},60000);
+setInterval(()=>{if(!document.hidden&&ready&&authReady()&&Date.now()-statsLastAt>60000)refreshStats()},60000);
 </script>
 </body></html>
