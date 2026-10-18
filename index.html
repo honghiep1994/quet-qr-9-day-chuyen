@@ -482,6 +482,20 @@ function authDisplay(){
  $('authWho').textContent=authUser?authUser.employee+' – '+authUser.name:'';
  $('person').value=authUser?authUser.employee+' - '+authUser.name:'';
  $('authStatus').textContent=authUser?(authUser.mustChange?'Cần đổi PIN trước khi cấp/hủy.':'Đã xác thực nhân viên '+authUser.name):'Vui lòng đăng nhập để cấp/hủy.';
+ showAuthenticatedView();
+}
+function showAuthenticatedView(){
+ const allowed=authReady();
+ $('loginView').hidden=allowed;
+ $('loginView').style.display=allowed?'none':'flex';
+ $('appView').hidden=!allowed;
+ $('appView').style.display=allowed?'block':'none';
+ if(allowed&&!$('appView').dataset.entered){
+  $('appView').dataset.entered='1';
+  window.scrollTo(0,0);
+  if(ready)refreshStats();
+ }
+ if(!allowed)delete $('appView').dataset.entered;
 }
 function authSend(action,fields){
  if(authPending)return;
